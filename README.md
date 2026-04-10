@@ -50,4 +50,51 @@ from bpn_analysis import plot_ERP, plot_PSD
 ```
 
 
+## Contributing
 
+This is a private repository for BPN lab members. Contributions are made via feature branches and pull requests rather than forks.
+
+### Setup
+
+1. Clone the repo:
+```bash
+   git clone https://github.com/Randomidous/data-analysis.git
+   cd data-analysis
+```
+2. Install in editable mode:
+```bash
+   pip install -e .
+```
+3. Install pre-commit hooks:
+```bash
+   pre-commit install
+```
+
+### Workflow
+
+1. Create a branch from `main`:
+```bash
+   git checkout -b your-git-name/short-description
+```
+2. Make your changes, commit often with clear messages
+3. Push your branch:
+```bash
+   git push -u origin your-git-name/short-description
+```
+4. Open a pull request against `main` on GitHub
+5. Request a review from a lab member before merging
+
+### Branch Naming
+
+| Type | Pattern | Example |
+|------|---------|---------|
+| Feature | `name/feature-desc` | `robin/add-ica-pipeline` |
+| Fix | `name/fix-desc` | `alex/fix-montage-rotation` |
+| Experiment | `name/exp-desc` | `maria/exp-zapline-threshold` |
+
+### Guidelines
+
+- Keep PRs focused - one logical change per PR
+- Pre-commit hooks run automatically on commit (formatting, linting)
+- Do not push directly to `main`, always use branches and keep main clean (mirror of upstream)
+- Include a short description in your PR of what changed and why
