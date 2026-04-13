@@ -257,7 +257,7 @@ def run_preprocessing(
     asr_cutoff : float
         ASR cutoff parameter (standard deviations above the clean baseline
         before a component is reconstructed).  Lower = more aggressive.
-        Typical range 5–20; default 20 is conservative.
+        Typical range 5-20; default 20 is conservative.
     rng_seed : int | None
         Random seed for ICA reproducibility.
     overwrite : bool
