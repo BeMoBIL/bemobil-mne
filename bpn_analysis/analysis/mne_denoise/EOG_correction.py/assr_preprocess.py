@@ -10,6 +10,17 @@ import matplotlib.pyplot as plt
 import mne
 import numpy as np
 import pandas as pd
+from bpn_analysis.analysis.mne_denoise.EOG_correction.assr_cfg import (
+    _BIDS_ENTITY_ORDER,
+    _EOG_DESC,
+    DATA_DIR,
+    DERIV_DIR,
+    FORCE_RERUN,
+    LOADER,
+    MODE,
+    PIPELINE_NAME,
+    PREPROCESSOR,
+)
 from mne.preprocessing import create_eog_epochs, find_eog_events
 from mne_denoise.dss import DSS, AverageBias, IterativeDSS, KurtosisDenoiser
 from mne_denoise.viz import (
@@ -20,22 +31,6 @@ from mne_denoise.viz import (
 )
 from mne_denoise.viz.components import _get_scores
 
-from bpn_analysis.analysis.mne_denoise.assr_cfg import (
-    _BIDS_ENTITY_ORDER,
-    _EOG_DESC,
-    # BANDPASS_ERP,
-    # BASELINE,
-    DATA_DIR,
-    DERIV_DIR,
-    # EPOCH_TIMES,
-    FORCE_RERUN,
-    LOADER,
-    MODE,
-    PIPELINE_NAME,
-    PREPROCESSOR,
-    # REMAPS,
-    # TSHIFT,
-)
 from bpn_analysis.io.utils import NumpyEncoder
 from bpn_analysis.preproc import compute_ica
 from bpn_analysis.viz.utils import clear_matplotlib_memory
@@ -580,6 +575,27 @@ def plot_blink_amplitude_comparison(df, out_path):
     plt.close()
 
 
+def _expected_outputs(fname_in):
+    """Return all output paths that run_single_subject would produce."""
+    entities = _parse_bids_entities(fname_in)
+    out_dir = DERIV_DIR / PIPELINE_NAME / f"sub-{entities['sub']}"
+    if "ses" in entities:
+        out_dir = out_dir / f"ses-{entities['ses']}"
+    out_dir = out_dir / "eeg"
+
+    def fpath(desc=None, suffix="eeg", ext=".fif.gz"):
+        return out_dir / (_bids_stem(entities, desc=desc, suffix=suffix) + ext)
+
+    return [
+        fpath(desc="minimal"),
+        fpath(desc="preproc-clean"),
+        *(fpath(desc=desc) for desc in _EOG_DESC.values()),
+        fpath(desc="muscleICA", suffix="ica"),
+        fpath(desc="blinkERP-comparison", suffix="fig", ext=".png"),
+        fpath(desc="blinkAmplitude-comparison", suffix="fig", ext=".png"),
+    ]
+
+
 def run_single_subject(fname_in):
     """Run the EOG-removal comparison pipeline on an already-loaded *raw*.
 
@@ -608,6 +624,10 @@ def run_single_subject(fname_in):
     ic_labels : dict
     bad_ch_dict : dict
     """
+    if not FORCE_RERUN and all(p.exists() for p in _expected_outputs(fname_in)):
+        print(f"[SKIP] {fname_in.name} — all outputs present")
+        return
+
     print(f"\n=== Processing {fname_in} ===")
     raw = LOADER.load(fname_in)
     if "EOG" not in raw.ch_names:
@@ -628,15 +648,15 @@ def run_single_subject(fname_in):
     print(f"Found {len(blink_annots)} blink events")
     raw.set_annotations(blink_annots)  # we don't care too much about the other annots
 
-    # Stage 1: shared preprocessing (muscle artifacts removed)
+    # shared preprocessing
     raw_minimal, raw_clean, _, ica, ic_labels, bad_ch_dict = PREPROCESSOR.run_raw(raw)
 
     # reintroduce the EOG channel and restore blink annotations
     for raw_temp in (raw_minimal, raw_clean):
-        raw_temp.set_annotations(blink_annots)
+        raw_temp.set_annotations(blink_annots)  # drop BAD_breaks essenitally
         raw_temp.add_channels([raw_eog.copy()], force_update_info=True)
 
-    # Stage 2: EOG removal — each method receives the same raw_clean
+    # EOG removal
     eog_cleaned = {
         "linear_dss": linear_dss_EOG_removal(raw_clean),
         "nonlinear_dss": nonlinear_dss_EOG_removal(raw_clean),
@@ -645,6 +665,7 @@ def run_single_subject(fname_in):
 
     df, peak_info = compute_blink_amplitudes(raw_minimal, eog_cleaned)
 
+    # save derivatives
     entities = _parse_bids_entities(fname_in)
     save_bids_derivatives(
         entities,
@@ -658,8 +679,6 @@ def run_single_subject(fname_in):
         peak_info,
         overwrite=FORCE_RERUN,
     )
-
-    # build per-subject output dir (mirrors save_bids_derivatives layout)
     sub_dir = DERIV_DIR / PIPELINE_NAME / f"sub-{entities['sub']}"
     if "ses" in entities:
         sub_dir = sub_dir / f"ses-{entities['ses']}"
