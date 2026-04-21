@@ -18,7 +18,10 @@ DATA_DIR = Path(
 )
 DERIV_DIR = DATA_DIR / "derivatives"
 
-PIPELINE_NAME = "mne-denoise"
+PIPELINE_NAME = "EOG_correction"
+
+README_DESTINATION = DERIV_DIR / PIPELINE_NAME / "README.md"
+
 
 # %% epoch / analysis settings
 

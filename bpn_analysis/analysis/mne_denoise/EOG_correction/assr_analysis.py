@@ -10,17 +10,6 @@ import matplotlib.pyplot as plt
 import mne
 import numpy as np
 import pandas as pd
-from bpn_analysis.analysis.mne_denoise.EOG_correction.assr_cfg import (
-    _BIDS_ENTITY_ORDER,
-    _EOG_DESC,
-    DATA_DIR,
-    DERIV_DIR,
-    FORCE_RERUN,
-    LOADER,
-    MODE,
-    PIPELINE_NAME,
-    PREPROCESSOR,
-)
 from mne.preprocessing import create_eog_epochs, find_eog_events
 from mne_denoise.dss import DSS, AverageBias, IterativeDSS, KurtosisDenoiser
 from mne_denoise.viz import (
@@ -31,6 +20,18 @@ from mne_denoise.viz import (
 )
 from mne_denoise.viz.components import _get_scores
 
+from bpn_analysis.analysis.mne_denoise.EOG_correction.assr_cfg import (
+    _BIDS_ENTITY_ORDER,
+    _EOG_DESC,
+    DATA_DIR,
+    DERIV_DIR,
+    FORCE_RERUN,
+    LOADER,
+    MODE,
+    PIPELINE_NAME,
+    PREPROCESSOR,
+    README_DESTINATION,
+)
 from bpn_analysis.io.utils import NumpyEncoder
 from bpn_analysis.preproc import compute_ica
 from bpn_analysis.viz.utils import clear_matplotlib_memory
@@ -842,6 +843,14 @@ def main():
 
     if MODE in ("group", True):
         run_group()
+
+    # save README in repository to the destination
+    if README_DESTINATION:
+        readme_src = Path(__file__).parent / "README.md"
+        readme_dst = README_DESTINATION
+        readme_dst.parent.mkdir(parents=True, exist_ok=True)
+        readme_dst.write_text(readme_src.read_text())
+        print(f"Saved README to {readme_dst}")
 
 
 # %% Main
