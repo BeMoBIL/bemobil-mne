@@ -7,15 +7,13 @@ from bpn_analysis.preproc import EEGPreprocessor
 
 # %% run mode
 
-MODE = "single"  # can be "single", "group", or True (both)
+MODE = True  # can be "single", "group", or True (both)
 
 FORCE_RERUN = True  # set True to reprocess subjects even if all outputs exist
 
 # %% paths
 
-DATA_DIR = Path(
-    r"\\stor1.bpn.tu-berlin.de\projects\Project_Eric\ASSR\Data\CURRENT_DATA\BIDS"
-)
+DATA_DIR = Path(r"C:\Users\random\OneDrive - Zander Labs\Desktop\datasets\assr")
 DERIV_DIR = DATA_DIR / "derivatives"
 
 PIPELINE_NAME = "EOG_correction"

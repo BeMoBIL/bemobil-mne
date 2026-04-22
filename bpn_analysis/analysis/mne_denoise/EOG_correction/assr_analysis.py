@@ -74,16 +74,16 @@ def save_bids_derivatives(
     Output layout::
 
         DERIV_DIR / PIPELINE_NAME / sub-XX / [ses-XX /] eeg /
-            sub-XX[…]_desc-minimal_eeg.fif.gz            — bandpass only
-            sub-XX[…]_desc-preproc-clean_eeg.fif.gz      — after muscle ICA
-            sub-XX[…]_desc-linearDSS_eeg.fif.gz          — linear DSS EOG removal
-            sub-XX[…]_desc-nonlinearDSS_eeg.fif.gz       — nonlinear DSS EOG removal
-            sub-XX[…]_desc-icaEOG_eeg.fif.gz             — ICA EOG removal
-            sub-XX[…]_desc-muscleICA_ica.fif.gz          — fitted muscle ICA
+            sub-XX[…]_desc-minimal_eeg.fif.gz           : bandpass only
+            sub-XX[…]_desc-preproc-clean_eeg.fif.gz     : after muscle ICA
+            sub-XX[…]_desc-linearDSS_eeg.fif.gz         : linear DSS EOG removal
+            sub-XX[…]_desc-nonlinearDSS_eeg.fif.gz      : nonlinear DSS EOG removal
+            sub-XX[…]_desc-icaEOG_eeg.fif.gz            : ICA EOG removal
+            sub-XX[…]_desc-muscleICA_ica.fif.gz         : fitted muscle ICA
             sub-XX[…]_iclabels.json
             sub-XX[…]_bads.json
-            sub-XX[…]_desc-blinkAmplitudes_channels.tsv  — per-blink amplitude table
-            sub-XX[…]_desc-blinkAmplitudes_channels.json — peak channel / latency
+            sub-XX[…]_desc-blinkAmplitudes_channels.tsv : per-blink amplitude table
+            sub-XX[…]_desc-blinkAmplitudes_channels.json: peak channel / latency
     """
     out_dir = DERIV_DIR / PIPELINE_NAME / f"sub-{entities['sub']}"
     if "ses" in entities:
@@ -139,7 +139,7 @@ def compute_blink_amplitudes(raw_original, cleaned_raws, tmin=-0.5, tmax=0.5):
         Each cell is the amplitude in µV at the peak-blink (channel, latency)
         for that blink event.  A good cleaning method produces values near zero.
     peak_info : dict
-        ``{"channel": str, "latency_s": float}`` — the coordinate used.
+        ``{"channel": str, "latency_s": float}``: the coordinate used.
     """
     # blink events from annotations
     events, ids = mne.events_from_annotations(raw_original, verbose=False)
@@ -189,7 +189,7 @@ def compute_blink_amplitudes(raw_original, cleaned_raws, tmin=-0.5, tmax=0.5):
 # %% EOG correction
 
 
-def linear_dss_EOG_removal(raw):
+def linear_dss_EOG_removal(raw, out_dir, entities=None):
     """Use present EOG channel to fit a linear DSS model for blink removal.
 
     Returns
@@ -236,6 +236,9 @@ def linear_dss_EOG_removal(raw):
         data=eog_epochs,
         title_prefix="TrialAverageBias",
         n_components=10,
+        out_dir=out_dir,
+        entities=entities,
+        desc="linearDSS",
     )
 
     # Reconstruct: keep every component except the blink one.
@@ -246,7 +249,7 @@ def linear_dss_EOG_removal(raw):
     return raw_clean
 
 
-def nonlinear_dss_EOG_removal(raw):
+def nonlinear_dss_EOG_removal(raw, out_dir, entities=None):
     """Remove EOG channel and fit a nonlinear DSS model for blink removal.
 
     Note:
@@ -281,6 +284,9 @@ def nonlinear_dss_EOG_removal(raw):
         data=data,
         title_prefix="KurtosisDSS (nonlinear)",
         n_components=5,
+        out_dir=out_dir,
+        entities=entities,
+        desc="nonlinearDSS",
     )
 
     # Reconstruct: zero out the blink component, keep the rest.
@@ -312,15 +318,22 @@ def ICA_EOG_removal(
     raw_clean : mne.io.Raw
         EEG-only raw with eye components removed.
     """
-    ica, _ = compute_ica(
+    ica, ic_labels = compute_ica(
         raw.copy().pick("eeg"),
         filter_bands_ica=filter_bands_ica,
         notch_freqs=notch_freqs,
         downsample_ica=downsample_ica,
         thresh=thresh,
         rng_seed=rng_seed,
-        exclude_labels=["eye"],
+        exclude_labels=["eye blink"],
     )
+    for idx, (lbl, prob) in enumerate(
+        zip(ic_labels["labels"], ic_labels["y_pred_proba"])
+    ):
+        marker = " ← excluded" if idx in ica.exclude else ""
+        print(f"  IC{idx:03d}: {lbl:<20s} prob={prob:.3f}{marker}")
+    print(f"ICA EOG: excluding {len(ica.exclude)} component(s): {ica.exclude}")
+
     raw_ica = ica.apply(raw.copy().pick("eeg"))
 
     return raw_ica
@@ -340,7 +353,9 @@ def plot_eog_results(
     n_components=5,
     start_idx=5000,
     end_idx=10000,
-    sub_id=None,
+    out_dir=None,
+    entities=None,
+    desc="dss",
 ):
     """Plot DSS / IterativeDSS EOG-removal diagnostics.
 
@@ -353,7 +368,7 @@ def plot_eog_results(
     sources : ndarray, shape (n_components, n_times)
         Output of ``model.transform()`` on the continuous EEG data.
     raw : mne.io.Raw
-        Original recording — used to access the EOG channel and sampling rate.
+        Original recording: used to access the EOG channel and sampling rate.
     info : mne.Info
         Channel info of the EEG-only data (used for topographic patterns).
     picks : ndarray of int
@@ -367,29 +382,49 @@ def plot_eog_results(
         Number of components shown in the diagnostic plots.
     start_idx, end_idx : int
         Sample range used for the EOG-vs-component overlay plot.
+    out_dir : path-like | None
+        Directory where all figures are saved.  If None figures are shown
+        interactively (not recommended for batch runs).
     """
+
+    def _save_or_show(fig, plot_name):
+        if out_dir is not None:
+            if entities is not None:
+                fname = (
+                    _bids_stem(entities, desc=f"{desc}-{plot_name}", suffix="fig")
+                    + ".png"
+                )
+            else:
+                fname = f"{desc}_{plot_name}.png"
+            fig.savefig(Path(out_dir) / fname, dpi=150)
+            plt.close(fig)
+
     # --- Component diagnostics ------------------------------------------------
     # IterativeDSS does not expose component scores; skip gracefully.
     try:
-        plot_component_score_curve(model, mode="ratio", show=True)
+        fig = plot_component_score_curve(model, mode="ratio", show=False)
+        _save_or_show(fig, "scoreCurve")
     except ValueError:
-        print("Score curve not available for this model type — skipping.")
+        print("Score curve not available for this model type: skipping.")
     if data is not None:
-        plot_component_time_series(
-            model, data=data, n_components=n_components, show=True
+        fig = plot_component_time_series(
+            model, data=data, n_components=n_components, show=False
         )
-    plot_component_patterns(
-        model, info=info, picks=picks, n_components=n_components, show=True
+        _save_or_show(fig, "timeSeries")
+    fig = plot_component_patterns(
+        model, info=info, picks=picks, n_components=n_components, show=False
     )
+    _save_or_show(fig, "patterns")
     if data is not None:
-        plot_component_summary(
+        fig = plot_component_summary(
             model,
             data=data,
             info=info,
             picks=picks,
             n_components=list(range(min(4, n_components))),
-            show=True,
+            show=False,
         )
+        _save_or_show(fig, "summary")
 
     try:
         scores = _get_scores(model)
@@ -397,7 +432,7 @@ def plot_eog_results(
         candidates = [i for i, s in enumerate(scores) if s >= mean_score]
     except Exception:
         print(
-            "Component scores not available for this model type —"
+            "Component scores not available for this model type:"
             " skipping score-based candidate selection."
         )
         candidates = list(range(sources.shape[0]))
@@ -416,7 +451,7 @@ def plot_eog_results(
         best_corr = corrs[best_idx]
         print(f"→ Using Comp {best_idx} (highest EOG correlation: {best_corr:.3f})")
     else:
-        print("No EOG channel found — falling back to Comp 0.")
+        print("No EOG channel found: falling back to Comp 0.")
         eog_data = np.zeros(sources.shape[1])
         best_idx = 0
         best_corr = 0.0
@@ -432,9 +467,9 @@ def plot_eog_results(
     flip = -1 if np.corrcoef(eog_snippet, comp_snippet)[0, 1] < 0 else 1
     scale = np.max(np.abs(eog_snippet)) / np.max(np.abs(comp_snippet))
 
-    plt.figure(figsize=(12, 4))
-    plt.plot(t_window, eog_snippet, "b", linewidth=1.5, label="EOG Channel")
-    plt.plot(
+    fig, ax = plt.subplots(figsize=(12, 4))
+    ax.plot(t_window, eog_snippet, "b", linewidth=1.5, label="EOG Channel")
+    ax.plot(
         t_window,
         flip * comp_snippet * scale,
         "r",
@@ -442,15 +477,15 @@ def plot_eog_results(
         label=f"DSS Comp {best_idx} (aligned & scaled)",
         alpha=0.8,
     )
-    plt.xlabel("Time (s)")
-    plt.ylabel("Amplitude (a.u.)")
-    plt.title(
-        f"{title_prefix}: Blink Peaks Aligned — Comp {best_idx} (r={best_corr:.3f})"
+    ax.set_xlabel("Time (s)")
+    ax.set_ylabel("Amplitude (a.u.)")
+    ax.set_title(
+        f"{title_prefix}: Blink Peaks Aligned: Comp {best_idx} (r={best_corr:.3f})"
     )
-    plt.legend()
-    plt.grid(True, alpha=0.3)
-    plt.tight_layout()
-    plt.savefig(f"sub-{sub_id}_{title_prefix}_blink_component_overlay.png", dpi=300)
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+    fig.tight_layout()
+    _save_or_show(fig, "blinkOverlay")
 
     return best_idx
 
@@ -464,8 +499,8 @@ def plot_blink_erp_comparison(data, out_path):
     ----------
     data : dict[str, mne.Epochs | list[mne.Evoked]]
         Per-method data keyed by label. Values are either:
-        - ``mne.Epochs``: single subject — SEM computed across trials
-        - ``list[mne.Evoked]``: group — SEM computed across subjects
+        - ``mne.Epochs``: single subject: SEM computed across trials
+        - ``list[mne.Evoked]``: group: SEM computed across subjects
     out_path : path-like, optional
         Save destination. If given the figure is saved and closed; otherwise shown.
     """
@@ -570,7 +605,7 @@ def plot_blink_amplitude_comparison(df, out_path):
 
     axes[0][0].set_ylabel("amplitude at blink peak (µV)")
     prefix = "group " if is_group else ""
-    fig.suptitle(f"{prefix}blink amplitude — residual per method", fontsize=11)
+    fig.suptitle(f"{prefix}blink amplitude: residual per method", fontsize=11)
     plt.tight_layout()
     fig.savefig(out_path, dpi=300)
     plt.close()
@@ -601,7 +636,7 @@ def run_single_subject(fname_in):
     """Run the EOG-removal comparison pipeline on an already-loaded *raw*.
 
     Pipeline:
-      1. :data:`PREPROCESSOR` — bad channels → ASR → muscle-artifact ICA
+      1. :data:`PREPROCESSOR`: bad channels → ASR → muscle-artifact ICA
          → ``raw_clean`` (common baseline for all EOG methods)
       2. Three EOG-removal methods applied in parallel to ``raw_clean``:
          - Linear DSS  (trial-average bias)
@@ -618,7 +653,7 @@ def run_single_subject(fname_in):
     raw_minimal : mne.io.Raw
         Bandpass-filtered recording before any artifact removal.
     raw_clean : mne.io.Raw
-        Muscle-ICA cleaned recording — common input to all EOG methods.
+        Muscle-ICA cleaned recording: common input to all EOG methods.
     eog_cleaned : dict[str, mne.io.Raw]
         ``{"linear_dss": ..., "nonlinear_dss": ..., "ica": ...}``
     ica : mne.preprocessing.ICA
@@ -626,14 +661,22 @@ def run_single_subject(fname_in):
     bad_ch_dict : dict
     """
     if not FORCE_RERUN and all(p.exists() for p in _expected_outputs(fname_in)):
-        print(f"[SKIP] {fname_in.name} — all outputs present")
+        print(f"[SKIP] {fname_in.name}: all outputs present")
         return
 
     print(f"\n=== Processing {fname_in} ===")
     raw = LOADER.load(fname_in)
     if "EOG" not in raw.ch_names:
-        print(f"[SKIP] {fname_in.name} — no EOG channel")
+        print(f"[SKIP] {fname_in.name}: no EOG channel")
         return
+
+    # resolve output directory early so plots land in the right place
+    entities = _parse_bids_entities(fname_in)
+    sub_dir = DERIV_DIR / PIPELINE_NAME / f"sub-{entities['sub']}"
+    if "ses" in entities:
+        sub_dir = sub_dir / f"ses-{entities['ses']}"
+    sub_dir = sub_dir / "eeg"
+    sub_dir.mkdir(parents=True, exist_ok=True)
 
     # get EOG channel
     raw.set_channel_types({"EOG": "eog"})
@@ -647,27 +690,39 @@ def run_single_subject(fname_in):
         blink_events, sfreq=raw_eog.info["sfreq"], event_desc={998: "blink"}
     )
     print(f"Found {len(blink_annots)} blink events")
-    raw.set_annotations(blink_annots)  # we don't care too much about the other annots
 
     # shared preprocessing
     raw_minimal, raw_clean, _, ica, ic_labels, bad_ch_dict = PREPROCESSOR.run_raw(raw)
 
-    # reintroduce the EOG channel and restore blink annotations
-    for raw_temp in (raw_minimal, raw_clean):
-        raw_temp.set_annotations(blink_annots)  # drop BAD_breaks essenitally
+    bad = [d.upper().startswith("BAD") for d in raw_minimal.annotations.description]
+    bad_annots = mne.Annotations(
+        raw_minimal.annotations.onset[bad],
+        raw_minimal.annotations.duration[bad],
+        raw_minimal.annotations.description[bad],
+        orig_time=raw_minimal.annotations.orig_time,
+    )
+
+    # reintroduce the EOG channel; keep BAD annotations from preprocessing so
+    # as well as blinks. Other annots can be dropped.
+    for raw_temp in (raw, raw_minimal, raw_clean):
+        raw_temp.set_annotations(bad_annots + blink_annots)
         raw_temp.add_channels([raw_eog.copy()], force_update_info=True)
 
-    # EOG removal
+    # EOG artifact removal
     eog_cleaned = {
-        "linear_dss": linear_dss_EOG_removal(raw_clean),
-        "nonlinear_dss": nonlinear_dss_EOG_removal(raw_clean),
+        "linear_dss": linear_dss_EOG_removal(
+            raw_clean, out_dir=sub_dir, entities=entities
+        ),
+        "nonlinear_dss": nonlinear_dss_EOG_removal(
+            raw_clean, out_dir=sub_dir, entities=entities
+        ),
         "ica": ICA_EOG_removal(raw_clean, rng_seed=PREPROCESSOR.rng_seed),
     }
 
+    # get peak amplitude for every blink
     df, peak_info = compute_blink_amplitudes(raw_minimal, eog_cleaned)
 
     # save derivatives
-    entities = _parse_bids_entities(fname_in)
     save_bids_derivatives(
         entities,
         raw_minimal,
@@ -680,10 +735,6 @@ def run_single_subject(fname_in):
         peak_info,
         overwrite=FORCE_RERUN,
     )
-    sub_dir = DERIV_DIR / PIPELINE_NAME / f"sub-{entities['sub']}"
-    if "ses" in entities:
-        sub_dir = sub_dir / f"ses-{entities['ses']}"
-    sub_dir = sub_dir / "eeg"
 
     # compute blink epochs for ERP plot
     _, ids = mne.events_from_annotations(raw_minimal, verbose=False)
@@ -728,14 +779,14 @@ def run_group():
 
     Outputs written to ``DERIV_DIR / PIPELINE_NAME /``::
 
-        group_desc-blinkAmplitudes_channels.tsv     — all trials, all subjects
-        group_desc-blinkAmplitudesSummary_channels.tsv — per-subject means / RMS
+        group_desc-blinkAmplitudes_channels.tsv    : all trials, all subjects
+        group_desc-blinkAmplitudesSummary_channels.tsv: per-subject means / RMS
     """
     tsv_files = sorted(
         (DERIV_DIR / PIPELINE_NAME).rglob("*_desc-blinkAmplitudes_channels.tsv")
     )
     if not tsv_files:
-        print("No per-subject blink amplitude files found — run single-subject first.")
+        print("No per-subject blink amplitude files found: run single-subject first.")
         return
 
     # load and stack
@@ -775,7 +826,7 @@ def run_group():
         group_df, out_path=out_dir / "group_blink-amplitude-comparison.png"
     )
 
-    # group ERP plot — load per-subject FIFs and compute evokeds
+    # group ERP plot: load per-subject FIFs and compute evokeds
     minimal_fifs = sorted(
         (DERIV_DIR / PIPELINE_NAME).rglob("*_desc-minimal_eeg.fif.gz")
     )
@@ -835,10 +886,8 @@ def main():
     if MODE in ("single", True):
         for fname_in in DATA_DIR.rglob("*.xdf"):
             if "walk" not in fname_in.name:
-                print(f"[SKIP] {fname_in.name} — not a walk session")
+                print(f"[SKIP] {fname_in.name}: not a walk session")
                 continue
-
-            # run the subject-level pipeline
             run_single_subject(fname_in)
 
     if MODE in ("group", True):
