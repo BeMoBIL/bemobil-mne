@@ -154,7 +154,7 @@ class EEGPreprocessor:
     downsample_ica : float
         Target sampling rate for ICA fitting.
     thresh : float
-        ICLabel probability threshold above which a non-brain component is excluded.
+        ICLabel probability threshold above which a component is in- or excluded.
     asr_cutoff : float
         ASR cutoff parameter (standard deviations above clean baseline).
         Lower values are more aggressive.  Typical range 5-20.
@@ -314,10 +314,12 @@ class EEGPreprocessor:
             fname_out = Path(fname_out).with_suffix("")
             fname_out.parent.mkdir(parents=True, exist_ok=True)
             raw_minimal.save(
-                fname_out.with_name(fname_out.name + "_minimal.fif.gz"), overwrite=overwrite
+                fname_out.with_name(fname_out.name + "_minimal.fif.gz"),
+                overwrite=overwrite,
             )
             raw_clean.save(
-                fname_out.with_name(fname_out.name + "_clean.fif.gz"), overwrite=overwrite
+                fname_out.with_name(fname_out.name + "_clean.fif.gz"),
+                overwrite=overwrite,
             )
             raw_asr.save(
                 fname_out.with_name(fname_out.name + "_asr.fif.gz"), overwrite=overwrite
@@ -325,7 +327,9 @@ class EEGPreprocessor:
             ica.save(
                 fname_out.with_name(fname_out.name + "_ica.fif.gz"), overwrite=overwrite
             )
-            with open(fname_out.with_name(fname_out.name + "_bad_channels.json"), "w") as f:
+            with open(
+                fname_out.with_name(fname_out.name + "_bad_channels.json"), "w"
+            ) as f:
                 json.dump(bad_ch_dict, f, indent=4, cls=NumpyEncoder)
             with open(fname_out.with_name(fname_out.name + "_iclabels.json"), "w") as f:
                 json.dump(ic_labels, f, indent=4, cls=NumpyEncoder)

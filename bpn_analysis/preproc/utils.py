@@ -190,7 +190,7 @@ def compute_ica(
             for idx, (label, prob) in enumerate(
                 zip(ic_labels["labels"], ic_labels["y_pred_proba"])
             )
-            if label not in include_labels and prob >= thresh
+            if label not in include_labels or prob < thresh
         ]
     else:
         exclude_idx = []
@@ -222,8 +222,8 @@ def compute_asr(raw, cutoff=20, estimator="scm"):
     raw_asr : mne.io.Raw
         Copy of *raw* with ASR applied to EEG channels.
     """
-    eeg_idx = mne.pick_types(raw.info, eeg=True)
-    eeg_data = raw.get_data(picks="eeg")
+    eeg_idx = mne.pick_types(raw.info, eeg=True, exclude=[])
+    eeg_data = raw.get_data(picks=eeg_idx)
 
     asr = ASR(sfreq=raw.info["sfreq"], cutoff=cutoff, estimator=estimator)
     asr.fit(eeg_data)
