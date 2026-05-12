@@ -20,6 +20,7 @@ classifiers = [
 dependencies = [
   "matplotlib",
   "mne",
+  "mne_bids",
   "mne-faster",
   "mne-icalabel",
   "nibabel",

@@ -967,7 +967,8 @@ def run_group():
     )
     n_total = len(summary_df)
     print(
-        f"\nResponder summary (threshold: {RESPONDER_THRESHOLD_PCT:.0f}% RMS reduction):"
+        f"\nResponder summary (threshold: {RESPONDER_THRESHOLD_PCT:.0f}"
+        "% RMS reduction):"
     )
     for method, sub_df in responder_df.groupby("method"):
         n_resp = sub_df["responder"].sum()

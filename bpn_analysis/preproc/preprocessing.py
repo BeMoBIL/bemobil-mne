@@ -155,9 +155,10 @@ class EEGPreprocessor:
         Target sampling rate for ICA fitting.
     thresh : float
         ICLabel probability threshold above which a component is in- or excluded.
-    asr_cutoff : float
+    asr_cutoff : float | False
         ASR cutoff parameter (standard deviations above clean baseline).
         Lower values are more aggressive.  Typical range 5-20.
+        Pass ``False`` to skip ASR entirely.
     rng_seed : int | None
         Random seed passed to ICA and PyPREP for reproducibility.
     annotate_break_kwargs : dict | None
@@ -185,7 +186,7 @@ class EEGPreprocessor:
         notch_freqs: tuple[float, ...] = (50, 100, 150),
         downsample_ica: float = 250.0,
         thresh: float = 0.7,
-        asr_cutoff: float = 20.0,
+        asr_cutoff: float | bool = 20.0,
         rng_seed: int | None = None,
         annotate_break_kwargs: dict | None = None,
         exclude_labels: list | None = None,
@@ -289,7 +290,10 @@ class EEGPreprocessor:
         raw_minimal.set_eeg_reference(ref_channels="average", projection=True)
 
         # --- ASR ---
-        raw_asr = compute_asr(raw_minimal, cutoff=self.asr_cutoff)
+        if self.asr_cutoff is False:
+            raw_asr = raw_minimal.copy()
+        else:
+            raw_asr = compute_asr(raw_minimal, cutoff=self.asr_cutoff)
 
         # --- ICA ---
         ica, ic_labels = compute_ica(
@@ -321,9 +325,11 @@ class EEGPreprocessor:
                 fname_out.with_name(fname_out.name + "_clean.fif.gz"),
                 overwrite=overwrite,
             )
-            raw_asr.save(
-                fname_out.with_name(fname_out.name + "_asr.fif.gz"), overwrite=overwrite
-            )
+            if self.asr_cutoff is not False:
+                raw_asr.save(
+                    fname_out.with_name(fname_out.name + "_asr.fif.gz"),
+                    overwrite=overwrite,
+                )
             ica.save(
                 fname_out.with_name(fname_out.name + "_ica.fif.gz"), overwrite=overwrite
             )

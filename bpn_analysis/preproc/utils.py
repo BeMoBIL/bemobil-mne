@@ -200,6 +200,143 @@ def compute_ica(
     return ica, ic_labels
 
 
+def fit_dipoles_on_ica(ica, info, trans="fsaverage"):
+    """Fit a single dipole to each ICA component topography.
+
+    Adapted from standard_scripts. Uses the fsaverage BEM and template
+    head→MRI transform by default, so no individual MRI is required.
+
+    Parameters
+    ----------
+    ica : mne.preprocessing.ICA
+        Fitted ICA object.
+    info : mne.Info
+        Channel info the ICA was fitted on (EEG channels only).
+    trans : str | Transform
+        Head→MRI transform. ``"fsaverage"`` uses MNE's built-in template.
+
+    Returns
+    -------
+    dipoles : list[mne.Dipole]
+        One dipole per component.
+    residuals : list[mne.Evoked]
+        Residual field per component.
+    """
+    fs_dir = mne.datasets.fetch_fsaverage(verbose=False)
+    bem = str(fs_dir / "bem" / "fsaverage-5120-5120-5120-bem-sol.fif")
+
+    cov = mne.cov.make_ad_hoc_cov(info, std=dict(eeg=1))
+    components = ica.get_components()  # (n_channels, n_components)
+
+    sel = mne.channel_indices_by_type(info, picks="eeg", exclude="bads")["eeg"]
+    info_clean = mne.pick_info(info, sel=sel)
+
+    evoked = mne.EvokedArray(components, info_clean)
+    evoked.set_eeg_reference(ref_channels="average")
+    if not evoked.info["dev_head_t"]:
+        evoked.info["dev_head_t"] = mne.Transform(fro="meg", to="head")
+
+    dipoles, residuals = mne.fit_dipole(evoked, cov=cov, bem=bem, trans=trans, verbose=False)
+
+    dipoles._set_times(np.zeros_like(dipoles.times))
+    dipoles = [dip for dip in dipoles]
+    _dat = residuals.get_data()
+    residuals = [mne.EvokedArray(_dat[:, i : i + 1], info_clean) for i in range(_dat.shape[1])]
+
+    return dipoles, residuals
+
+
+def compute_dipolarity(components, info, rv_thresh=0.15, trans="fsaverage"):
+    """Fraction of ICA topographies with dipole residual variance below *rv_thresh*.
+
+    RV = 1 − GOF/100. A component is dipolar when RV < *rv_thresh* (default 15%).
+
+    Parameters
+    ----------
+    components : ndarray, shape (n_channels, n_components)
+        ICA mixing-matrix columns (topographies). For a standard ICA use
+        ``ica.get_components()``. For a combined head+neck ICA, pass only
+        the head-channel rows.
+    info : mne.Info
+        Channel info matching the rows of *components* (EEG channels only).
+    rv_thresh : float
+        Residual variance threshold in [0, 1].
+    trans : str | Transform
+        Passed to ``mne.fit_dipole``.
+
+    Returns
+    -------
+    dict
+        ``fraction_dipolar``, ``n_dipolar``, ``rv_values`` (one per component).
+    """
+    fs_dir = mne.datasets.fetch_fsaverage(verbose=False)
+    bem = str(fs_dir / "bem" / "fsaverage-5120-5120-5120-bem-sol.fif")
+
+    sel = mne.channel_indices_by_type(info, picks="eeg", exclude="bads")["eeg"]
+    info_clean = mne.pick_info(info, sel=sel)
+    components_clean = components[sel, :]
+
+    cov = mne.cov.make_ad_hoc_cov(info_clean, std=dict(eeg=1))
+    evoked = mne.EvokedArray(components_clean, info_clean)
+    evoked.set_eeg_reference(ref_channels="average")
+    if not evoked.info["dev_head_t"]:
+        evoked.info["dev_head_t"] = mne.Transform(fro="meg", to="head")
+
+    try:
+        dipoles, _ = mne.fit_dipole(evoked, cov=cov, bem=bem, trans=trans, verbose=False)
+        dipoles._set_times(np.zeros_like(dipoles.times))
+        rvs = [float(1.0 - dip.gof[0] / 100.0) for dip in dipoles]
+    except Exception as exc:
+        LOGGER.warning(f"Dipole fitting failed: {exc}")
+        return {"fraction_dipolar": np.nan, "n_dipolar": np.nan, "rv_values": []}
+
+    n_dipolar = int(sum(rv < rv_thresh for rv in rvs))
+    return {
+        "fraction_dipolar": n_dipolar / len(rvs) if rvs else np.nan,
+        "n_dipolar": n_dipolar,
+        "rv_values": rvs,
+    }
+
+
+def compute_mi_reduction(raw_before, raw_after, picks="eeg"):
+    """Total pairwise MI reduction under the Gaussian approximation.
+
+    MI_total = −½ · logdet(R), where R is the channel correlation matrix.
+    Independent channels → R = I → MI = 0. A good denoiser reduces MI by
+    removing shared artifact variance.
+
+    Parameters
+    ----------
+    raw_before, raw_after : mne.io.Raw
+        Recordings before and after denoising.
+    picks : str
+        Channel type to include (default ``"eeg"``).
+
+    Returns
+    -------
+    dict
+        ``mi_before``, ``mi_after``, ``mi_reduction`` (before − after),
+        ``mi_reduction_pct``.
+    """
+    def _gaussian_mi(data):
+        R = np.corrcoef(data)
+        p = R.shape[0]
+        R_reg = R + 1e-6 * np.eye(p)
+        sign, logdet = np.linalg.slogdet(R_reg)
+        return float(-0.5 * logdet) if sign > 0 else np.nan
+
+    mi_b = _gaussian_mi(raw_before.get_data(picks=picks))
+    mi_a = _gaussian_mi(raw_after.get_data(picks=picks))
+    reduction = mi_b - mi_a
+    pct = (reduction / abs(mi_b) * 100.0) if (not np.isnan(mi_b) and mi_b != 0) else np.nan
+    return {
+        "mi_before": mi_b,
+        "mi_after": mi_a,
+        "mi_reduction": reduction,
+        "mi_reduction_pct": pct,
+    }
+
+
 def compute_asr(raw, cutoff=20, estimator="scm"):
     """Apply ASR to the EEG channels of *raw*.
 

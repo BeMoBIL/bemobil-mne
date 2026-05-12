@@ -9,7 +9,7 @@ from bpn_analysis.preproc import EEGPreprocessor
 
 SKIP_THESE = ["13", "17", "16"]
 
-MODE = "group"  # can be "single", "group", or True (both)
+MODE = True  # can be "single", "group", or True (both)
 
 FORCE_RERUN = True  # set True to reprocess subjects even if all outputs exist
 
