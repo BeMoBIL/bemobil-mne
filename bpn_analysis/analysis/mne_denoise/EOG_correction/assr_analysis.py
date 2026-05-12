@@ -4,6 +4,8 @@
 
 import json
 import re
+import traceback
+import warnings
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -31,6 +33,8 @@ from bpn_analysis.analysis.mne_denoise.EOG_correction.assr_cfg import (
     PIPELINE_NAME,
     PREPROCESSOR,
     README_DESTINATION,
+    RESPONDER_THRESHOLD_PCT,
+    SKIP_THESE,
 )
 from bpn_analysis.io.utils import NumpyEncoder
 from bpn_analysis.preproc import compute_ica
@@ -206,6 +210,12 @@ def linear_dss_EOG_removal(raw, out_dir, entities=None):
         tmax=0.5,
         verbose=False,
     )
+    if len(eog_epochs) == 0:
+        warnings.warn(
+            "linear_dss_EOG_removal: all EOG epochs were dropped — "
+            "returning EEG data without DSS correction."
+        )
+        return raw.copy().pick_types(eeg=True, eog=False, ecg=False)
     # IMPORTANT: DSS should be fitted on the data channels (MEG) we want to clean.
     # We exclude the EOG channel itself from the model.
     eog_epochs.pick_types(eeg=True, eog=False, ecg=False)
@@ -446,9 +456,10 @@ def plot_eog_results(
             [abs(np.corrcoef(eog_data, sources[i, :])[0, 1]) for i in candidates]
         )
         for i, c in enumerate(corrs):
-            print(f"Correlation (Comp {i} vs EOG): {c:.3f}")
-        best_idx = int(np.argmax(corrs))
-        best_corr = corrs[best_idx]
+            print(f"Correlation (Comp {candidates[i]} vs EOG): {c:.3f}")
+        best_local = int(np.argmax(corrs))
+        best_idx = candidates[best_local]
+        best_corr = corrs[best_local]
         print(f"→ Using Comp {best_idx} (highest EOG correlation: {best_corr:.3f})")
     else:
         print("No EOG channel found: falling back to Comp 0.")
@@ -458,33 +469,32 @@ def plot_eog_results(
 
     blink_source = sources[best_idx, :]
 
-    # --- EOG vs best-correlated component overlay ----------------------------
-    # Show a time window with clear blinks, scaled and polarity-aligned.
+    # --- EOG vs best-correlated component: stacked panels --------------------
     t_window = np.arange(start_idx, end_idx) / raw.info["sfreq"]
     eog_snippet = eog_data[start_idx:end_idx]
     comp_snippet = blink_source[start_idx:end_idx]
 
+    # flip component polarity so peaks align visually with EOG
     flip = -1 if np.corrcoef(eog_snippet, comp_snippet)[0, 1] < 0 else 1
-    scale = np.max(np.abs(eog_snippet)) / np.max(np.abs(comp_snippet))
 
-    fig, ax = plt.subplots(figsize=(12, 4))
-    ax.plot(t_window, eog_snippet, "b", linewidth=1.5, label="EOG Channel")
-    ax.plot(
-        t_window,
-        flip * comp_snippet * scale,
-        "r",
-        linewidth=1.5,
-        label=f"DSS Comp {best_idx} (aligned & scaled)",
-        alpha=0.8,
+    fig, (ax_eog, ax_comp) = plt.subplots(
+        2, 1, figsize=(12, 6), sharex=True, constrained_layout=True
     )
-    ax.set_xlabel("Time (s)")
-    ax.set_ylabel("Amplitude (a.u.)")
-    ax.set_title(
-        f"{title_prefix}: Blink Peaks Aligned: Comp {best_idx} (r={best_corr:.3f})"
+    fig.suptitle(
+        f"{title_prefix}: EOG vs Comp {best_idx}  (r={best_corr:.3f})", fontsize=11
     )
-    ax.legend()
-    ax.grid(True, alpha=0.3)
-    fig.tight_layout()
+
+    ax_eog.plot(t_window, eog_snippet, color="steelblue", linewidth=1.5)
+    ax_eog.set_ylabel("EOG (a.u.)")
+    ax_eog.grid(True, alpha=0.3)
+    ax_eog.axhline(0, color="gray", linewidth=0.6)
+
+    ax_comp.plot(t_window, flip * comp_snippet, color="tomato", linewidth=1.5)
+    ax_comp.set_ylabel(f"Comp {best_idx} (a.u.{', flipped' if flip == -1 else ''})")
+    ax_comp.set_xlabel("Time (s)")
+    ax_comp.grid(True, alpha=0.3)
+    ax_comp.axhline(0, color="gray", linewidth=0.6)
+
     _save_or_show(fig, "blinkOverlay")
 
     return best_idx
@@ -606,6 +616,73 @@ def plot_blink_amplitude_comparison(df, out_path):
     axes[0][0].set_ylabel("amplitude at blink peak (µV)")
     prefix = "group " if is_group else ""
     fig.suptitle(f"{prefix}blink amplitude: residual per method", fontsize=11)
+    plt.tight_layout()
+    fig.savefig(out_path, dpi=300)
+    plt.close()
+
+
+def plot_group_blink_amplitude(group_df, out_path):
+    """Violin + subject-mean scatter for group blink-amplitude comparison.
+
+    One violin per method showing the trial-level distribution pooled across
+    subjects, with per-subject RMS means overlaid and connected to make the
+    paired structure visible.
+
+    Parameters
+    ----------
+    group_df : pd.DataFrame
+        Long-form group DataFrame with a ``"sub"`` column and one column per
+        method, as produced by :func:`run_group`.
+    out_path : path-like
+        Save destination.
+    """
+    method_cols = [c for c in group_df.columns if c != "sub"]
+    subs = sorted(group_df["sub"].unique())
+    n_methods = len(method_cols)
+
+    sub_means = (
+        group_df.groupby("sub")[method_cols]
+        .apply(lambda g: g.abs().mean())
+        .reindex(subs)
+    )
+
+    fig, ax = plt.subplots(figsize=(max(5, 2 * n_methods + 1), 5))
+
+    positions = list(range(1, n_methods + 1))
+    vals = [group_df[col].dropna().abs().values for col in method_cols]
+    parts = ax.violinplot(
+        vals, positions=positions, showmedians=True, showextrema=False
+    )
+    for pc in parts["bodies"]:
+        pc.set_alpha(0.35)
+
+    rng = np.random.default_rng(0)
+    for sub in subs:
+        row = sub_means.loc[sub]
+        x = [p + rng.uniform(-0.08, 0.08) for p in positions]
+        y = [row[col] for col in method_cols]
+        ax.plot(x, y, color="steelblue", alpha=0.4, linewidth=0.8, zorder=2)
+        ax.scatter(x, y, s=22, color="steelblue", alpha=0.7, zorder=3)
+
+    group_means = [sub_means[col].mean() for col in method_cols]
+    ax.scatter(
+        positions,
+        group_means,
+        s=60,
+        color="k",
+        zorder=4,
+        marker="D",
+        label="group mean",
+    )
+
+    ax.set_xticks(positions)
+    ax.set_xticklabels(method_cols, rotation=20, ha="right", fontsize=9)
+    ax.set_ylabel("|amplitude| at blink peak (µV)")
+    ax.set_title("blink residual amplitude by EOG-removal method", fontsize=11)
+    ax.axhline(0, color="gray", linewidth=0.6, linestyle="--")
+    ax.grid(True, axis="y", alpha=0.25)
+    ax.legend(fontsize=8)
+
     plt.tight_layout()
     fig.savefig(out_path, dpi=300)
     plt.close()
@@ -769,6 +846,51 @@ def run_single_subject(fname_in):
     clear_matplotlib_memory()
 
 
+def classify_responders(summary_df, threshold_pct=50.0):
+    """Classify subjects as responders / non-responders per EOG-removal method.
+
+    A subject is a responder for a given method if the RMS blink amplitude
+    is reduced by at least *threshold_pct* percent relative to the original.
+
+    Parameters
+    ----------
+    summary_df : pd.DataFrame
+        Per-subject summary with ``{method}_rms`` columns and ``original_rms``,
+        as produced by :func:`run_group`.
+    threshold_pct : float
+        Minimum percent RMS reduction to classify as a responder.
+
+    Returns
+    -------
+    pd.DataFrame
+        Tidy frame with columns:
+        ``sub``, ``method``, ``original_rms``, ``method_rms``,
+        ``pct_reduction``, ``responder``.
+    """
+    rows = []
+    for _, row in summary_df.iterrows():
+        orig_rms = row["original_rms"]
+        for method in _EOG_DESC:
+            method_rms = row[f"{method}_rms"]
+            if orig_rms > 0:
+                pct = (orig_rms - method_rms) / orig_rms * 100.0
+            else:
+                pct = np.nan
+            rows.append(
+                {
+                    "sub": row["sub"],
+                    "method": method,
+                    "original_rms": orig_rms,
+                    "method_rms": method_rms,
+                    "pct_reduction": pct,
+                    "responder": bool(pct >= threshold_pct)
+                    if not np.isnan(pct)
+                    else False,
+                }
+            )
+    return pd.DataFrame(rows)
+
+
 def run_group():
     """Load per-subject blink amplitude TSVs and produce a group-level report.
 
@@ -783,7 +905,11 @@ def run_group():
         group_desc-blinkAmplitudesSummary_channels.tsv: per-subject means / RMS
     """
     tsv_files = sorted(
-        (DERIV_DIR / PIPELINE_NAME).rglob("*_desc-blinkAmplitudes_channels.tsv")
+        f
+        for f in (DERIV_DIR / PIPELINE_NAME).rglob(
+            "*_desc-blinkAmplitudes_channels.tsv"
+        )
+        if "sub" in _parse_bids_entities(f)
     )
     if not tsv_files:
         print("No per-subject blink amplitude files found: run single-subject first.")
@@ -799,6 +925,17 @@ def run_group():
     group_df = pd.concat(dfs, ignore_index=True)
 
     method_cols = [c for c in group_df.columns if c != "sub"]
+
+    # drop outlier trials: any trial where the original blink amplitude falls
+    # outside the 3-IQR Tukey fence is excluded from summary and plot
+    orig = group_df["original"].dropna()
+    q1, q3 = orig.quantile(0.25), orig.quantile(0.75)
+    iqr = q3 - q1
+    mask = group_df["original"].between(q1 - 3 * iqr, q3 + 3 * iqr)
+    n_dropped = (~mask).sum()
+    if n_dropped:
+        print(f"Dropping {n_dropped} outlier blink trial(s) (3-IQR fence on original).")
+    group_df = group_df[mask].reset_index(drop=True)
 
     # per-subject summary: mean amplitude and RMS per method
     summary_rows = []
@@ -822,7 +959,21 @@ def run_group():
         index=False,
     )
 
-    plot_blink_amplitude_comparison(
+    responder_df = classify_responders(
+        summary_df, threshold_pct=RESPONDER_THRESHOLD_PCT
+    )
+    responder_df.to_csv(
+        out_dir / "group_desc-responders_channels.tsv", sep="\t", index=False
+    )
+    n_total = len(summary_df)
+    print(
+        f"\nResponder summary (threshold: {RESPONDER_THRESHOLD_PCT:.0f}% RMS reduction):"
+    )
+    for method, sub_df in responder_df.groupby("method"):
+        n_resp = sub_df["responder"].sum()
+        print(f"  {method}: {int(n_resp)}/{n_total} responders")
+
+    plot_group_blink_amplitude(
         group_df, out_path=out_dir / "group_blink-amplitude-comparison.png"
     )
 
@@ -883,12 +1034,26 @@ def run_group():
 
 def main():
     """Run main function."""
+    failed = []
     if MODE in ("single", True):
         for fname_in in DATA_DIR.rglob("*.xdf"):
             if "walk" not in fname_in.name:
                 print(f"[SKIP] {fname_in.name}: not a walk session")
                 continue
-            run_single_subject(fname_in)
+            if any(skip in fname_in.name for skip in SKIP_THESE):
+                print(f"[SKIP] {fname_in.name}: on skip list")
+                continue
+            try:
+                run_single_subject(fname_in)
+            except Exception as exc:
+                print(f"\n[ERROR] {fname_in.name}: {exc}")
+                traceback.print_exc()
+                failed.append((fname_in.name, str(exc)))
+
+    if failed:
+        print("\n=== Failed subjects ===")
+        for name, err in failed:
+            print(f"  {name}: {err}")
 
     if MODE in ("group", True):
         run_group()

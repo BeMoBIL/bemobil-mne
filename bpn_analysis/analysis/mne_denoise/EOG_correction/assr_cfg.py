@@ -7,9 +7,13 @@ from bpn_analysis.preproc import EEGPreprocessor
 
 # %% run mode
 
-MODE = True  # can be "single", "group", or True (both)
+SKIP_THESE = ["13", "17", "16"]
+
+MODE = "group"  # can be "single", "group", or True (both)
 
 FORCE_RERUN = True  # set True to reprocess subjects even if all outputs exist
+
+RESPONDER_THRESHOLD_PCT = 50.0  # minimum % RMS reduction to classify as responder
 
 # %% paths
 
