@@ -90,7 +90,12 @@ def _detect_neck_channels(raw: mne.io.BaseRaw) -> list[str]:
 
 
 def _to_bv_name(eloc_name: str) -> str:
-    """Map electrodes.tsv name (e.g. 'g1') to raw channel name ('BrainVision RDA_G01')."""
+    """Map electrodes.tsv name to raw channel name.
+
+    Example
+    -------
+    (e.g. 'g1') → 'BrainVision RDA_G01'
+    """
     prefix = eloc_name[0].upper()
     num = int(eloc_name[1:])
     return f"BrainVision RDA_{prefix}{num:02d}"
@@ -139,10 +144,14 @@ def _load_bids_raw(bids_path: BIDSPath) -> mne.io.BaseRaw:
             if ch["ch_name"] in ch_pos:
                 ch["loc"][:3] = ch_pos[ch["ch_name"]]
                 n_set += 1
-        print(f"  Set positions for {n_set}/{len(raw.ch_names)} channels from electrodes.tsv")
+        print(
+            f"  Set positions for {n_set}/{len(raw.ch_names)} "
+            "channels from electrodes.tsv"
+        )
     else:
         print(
-            f"  [WARN] electrodes.tsv not found for {bids_path.subject}/{bids_path.session}"
+            "  [WARN] electrodes.tsv not found for"
+            f" {bids_path.subject}/{bids_path.session}"
         )
 
     return raw

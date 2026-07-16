@@ -33,7 +33,8 @@ def _unit_scale(unit: str, ch_name: str = "") -> float:
         return 1e-6
     if normed not in _VOLT_UNITS and normed not in ("na", ""):
         logger.warning(
-            "Unrecognised unit '%s' for channel '%s' — assuming volts (no scaling applied).",
+            "Unrecognised unit '%s' for channel '%s' — assuming volts "
+            "(no scaling applied).",
             unit,
             ch_name,
         )

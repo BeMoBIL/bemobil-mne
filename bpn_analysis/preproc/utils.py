@@ -236,12 +236,16 @@ def fit_dipoles_on_ica(ica, info, trans="fsaverage"):
     if not evoked.info["dev_head_t"]:
         evoked.info["dev_head_t"] = mne.Transform(fro="meg", to="head")
 
-    dipoles, residuals = mne.fit_dipole(evoked, cov=cov, bem=bem, trans=trans, verbose=False)
+    dipoles, residuals = mne.fit_dipole(
+        evoked, cov=cov, bem=bem, trans=trans, verbose=False
+    )
 
     dipoles._set_times(np.zeros_like(dipoles.times))
     dipoles = [dip for dip in dipoles]
     _dat = residuals.get_data()
-    residuals = [mne.EvokedArray(_dat[:, i : i + 1], info_clean) for i in range(_dat.shape[1])]
+    residuals = [
+        mne.EvokedArray(_dat[:, i : i + 1], info_clean) for i in range(_dat.shape[1])
+    ]
 
     return dipoles, residuals
 
@@ -283,7 +287,9 @@ def compute_dipolarity(components, info, rv_thresh=0.15, trans="fsaverage"):
         evoked.info["dev_head_t"] = mne.Transform(fro="meg", to="head")
 
     try:
-        dipoles, _ = mne.fit_dipole(evoked, cov=cov, bem=bem, trans=trans, verbose=False)
+        dipoles, _ = mne.fit_dipole(
+            evoked, cov=cov, bem=bem, trans=trans, verbose=False
+        )
         dipoles._set_times(np.zeros_like(dipoles.times))
         rvs = [float(1.0 - dip.gof[0] / 100.0) for dip in dipoles]
     except Exception as exc:
@@ -318,6 +324,7 @@ def compute_mi_reduction(raw_before, raw_after, picks="eeg"):
         ``mi_before``, ``mi_after``, ``mi_reduction`` (before − after),
         ``mi_reduction_pct``.
     """
+
     def _gaussian_mi(data):
         R = np.corrcoef(data)
         p = R.shape[0]
@@ -328,7 +335,11 @@ def compute_mi_reduction(raw_before, raw_after, picks="eeg"):
     mi_b = _gaussian_mi(raw_before.get_data(picks=picks))
     mi_a = _gaussian_mi(raw_after.get_data(picks=picks))
     reduction = mi_b - mi_a
-    pct = (reduction / abs(mi_b) * 100.0) if (not np.isnan(mi_b) and mi_b != 0) else np.nan
+    pct = (
+        (reduction / abs(mi_b) * 100.0)
+        if (not np.isnan(mi_b) and mi_b != 0)
+        else np.nan
+    )
     return {
         "mi_before": mi_b,
         "mi_after": mi_a,

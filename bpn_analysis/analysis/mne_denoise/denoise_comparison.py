@@ -16,9 +16,10 @@ Run AFTER HIP-analysis.py has produced *_preproc_clean.fif.gz files.
 
 import gc
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 import matplotlib.pyplot as plt
 import mne
