@@ -4,27 +4,29 @@ Python repository for analysis utilities and project-specific scripts at BPN (Be
 
 ## Structure
 
+```
 bpn_analysis/
 ├── analysis/
 │   ├── mne_denoise/
 │   │   ├── denoise_comparison.py
 │   │   └── hip_preprocess.py
-│   ├── other_projects/
-│   │   ├── project-specific-script-1.py
-│   │   └── project-specific-script-2.py
-│   ├── io/                         # Data In/Out module
-│   │   ├── xdf.py                  # Functions for reading XDF files
-│   │   └── other-io-utils.py       # Other I/O functions
-│   ├── preproc/                    # Preprocessing module
-│   │   ├── epoching.py             # Epoching functions
-│   │   └── preprocessing.py        # Preprocessing functions
-│   └── viz/                        # Visualization module
-│       └── plotting.py             # Plotting functions
-└── data/
-    ├── montages/                   # EEG electrode montage files
+│   └── other_projects/
+│       ├── project-specific-script-1.py
+│       └── project-specific-script-2.py
+├── io/                       # Data In/Out module
+│   ├── xdf.py                # Functions for reading XDF files
+│   └── other-io-utils.py     # Other I/O functions
+├── preproc/                  # Preprocessing module
+│   ├── epoching.py           # Epoching functions
+│   └── preprocessing.py      # Preprocessing functions
+├── viz/                      # Visualization module
+│   └── plotting.py           # Plotting functions
+└── data/                     # Values that convey information
+    ├── montages/             # EEG electrode montage files
     │   ├── standard_MoBI_128.elc
     │   └── standard_MoBI_128_corrected.fif
     └── other-data/
+```
 
 
 ## Requirements
