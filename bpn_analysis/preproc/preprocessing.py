@@ -9,10 +9,10 @@ from pathlib import Path
 
 import mne
 import mne_faster
-import mne_icalabel
 import numpy as np
-from meegkit.asr import ASR
 from pyprep import NoisyChannels
+
+from bpn_analysis.preproc.utils import _annotate_break_iter, compute_asr, compute_ica
 
 # %% Functions
 
@@ -154,12 +154,27 @@ class EEGPreprocessor:
     downsample_ica : float
         Target sampling rate for ICA fitting.
     thresh : float
-        ICLabel probability threshold above which a non-brain component is excluded.
-    asr_cutoff : float
+        ICLabel probability threshold above which a component is in- or excluded.
+    asr_cutoff : float | False
         ASR cutoff parameter (standard deviations above clean baseline).
         Lower values are more aggressive.  Typical range 5-20.
+        Pass ``False`` to skip ASR entirely.
     rng_seed : int | None
         Random seed passed to ICA and PyPREP for reproducibility.
+    annotate_break_kwargs : dict | None
+        Keyword arguments forwarded to :func:`mne.preprocessing.annotate_break`.
+        Pass ``None`` to use the defaults in :func:`_annotate_break_iter`
+        (``min_break_duration=5``, zero start/stop padding).
+    exclude_labels : list of str | None
+        ICLabel categories to exclude (e.g. ``["muscle artifact"]``).
+        Mutually exclusive with *include_labels*.
+    include_labels : set of str | None
+        ICLabel categories to keep; all others are excluded.
+        Defaults to ``{"brain", "other"}``.  Mutually exclusive with
+        *exclude_labels*.
+    channel_types : dict | None
+        Mapping of channel name → MNE type string applied right after loading
+        (e.g. ``{"EOG": "eog"}``).  Pass ``None`` to skip.
     """
 
     def __init__(
@@ -171,8 +186,12 @@ class EEGPreprocessor:
         notch_freqs: tuple[float, ...] = (50, 100, 150),
         downsample_ica: float = 250.0,
         thresh: float = 0.7,
-        asr_cutoff: float = 20.0,
+        asr_cutoff: float | bool = 20.0,
         rng_seed: int | None = None,
+        annotate_break_kwargs: dict | None = None,
+        exclude_labels: list | None = None,
+        include_labels: set | None = frozenset({"brain", "other"}),
+        channel_types: dict | None = None,
     ):
         self.loader = loader
         self.filter_bands = filter_bands
@@ -182,30 +201,57 @@ class EEGPreprocessor:
         self.thresh = thresh
         self.asr_cutoff = asr_cutoff
         self.rng_seed = rng_seed
+        self.annotate_break_kwargs = annotate_break_kwargs
+        self.exclude_labels = exclude_labels
+        self.include_labels = include_labels
+        self.channel_types = channel_types
 
     def run(
         self,
         fname_in: str | Path,
-        fname_out: str | Path,
+        fname_out: str | Path | None = None,
         *,
         overwrite: bool = False,
-    ) -> tuple[
-        mne.io.BaseRaw,
-        mne.io.BaseRaw,
-        mne.io.BaseRaw,
-        mne.preprocessing.ICA,
-        dict,
-        dict,
-    ]:
-        """Run the full preprocessing pipeline on a single file.
+    ) -> tuple:
+        """Load *fname_in* and run the full preprocessing pipeline.
 
         Parameters
         ----------
         fname_in : str | Path
             Path to the raw input file (XDF or any MNE-readable format).
-        fname_out : str | Path
-            Output stem (extensions are added automatically).
-            E.g. ``/data/sub-01/sub-01_preproc``.
+        fname_out : str | Path | None
+            Output stem for saving derivatives (extensions added automatically).
+            Pass ``None`` to skip saving.
+        overwrite : bool
+            Overwrite existing output files.
+
+        Returns
+        -------
+        Same as :meth:`run_raw`.
+        """
+        raw = self.loader.load(fname_in)
+        if self.channel_types:
+            raw.set_channel_types(self.channel_types)
+        raw.set_montage(mne.channels.make_standard_montage("standard_1005"))
+        return self.run_raw(raw, fname_out=fname_out, overwrite=overwrite)
+
+    def run_raw(
+        self,
+        raw: mne.io.BaseRaw,
+        fname_out: str | Path | None = None,
+        *,
+        overwrite: bool = False,
+    ) -> tuple:
+        """Run the preprocessing pipeline on an already-loaded *raw* object.
+
+        Parameters
+        ----------
+        raw : mne.io.BaseRaw
+            Recording to preprocess.  Channel types and montage must already
+            be set by the caller.
+        fname_out : str | Path | None
+            Output stem for saving derivatives (extensions added automatically).
+            Pass ``None`` to skip saving.
         overwrite : bool
             Overwrite existing output files.
 
@@ -214,9 +260,9 @@ class EEGPreprocessor:
         raw_minimal : mne.io.Raw
             Bandpass-filtered recording with average-reference projection.
         raw_clean : mne.io.Raw
-            ICA-cleaned recording with bad channels interpolated.
+            ASR + ICA cleaned recording with bad channels interpolated.
         raw_asr : mne.io.Raw
-            ASR-cleaned copy of ``raw_clean``.
+            ASR-only cleaned copy of ``raw_minimal``.
         ica : mne.preprocessing.ICA
             Fitted ICA object with ``exclude`` set.
         ic_labels : dict
@@ -224,10 +270,6 @@ class EEGPreprocessor:
         bad_ch_dict : dict
             Bad channel detection results from PyPREP / FASTER.
         """
-        fname_out = Path(fname_out).with_suffix("")
-        raw = self.loader.load(fname_in)
-        raw.set_montage(mne.channels.make_standard_montage("standard_1005"))
-
         # --- Bad channel detection ---
         bad_ch_dict = get_bad_chs(
             raw,
@@ -237,84 +279,65 @@ class EEGPreprocessor:
         )
         raw.info["bads"] = bad_ch_dict["all_bads"]
 
+        # --- Annotate breaks ---
+        annots_break = _annotate_break_iter(raw, self.annotate_break_kwargs)
+        raw.set_annotations(raw.annotations + annots_break)
+
         # --- Minimal copy: bandpass + avg-ref projection ---
         raw_minimal = raw.copy()
         raw_minimal.filter(l_freq=self.filter_bands[0], h_freq=None)
         raw_minimal.filter(l_freq=None, h_freq=self.filter_bands[1])
         raw_minimal.set_eeg_reference(ref_channels="average", projection=True)
 
-        # --- ICA copy: stricter HP, notch, downsample, avg-ref ---
-        raw_ica = raw.copy().pick("eeg")
-        raw_ica.filter(l_freq=self.filter_bands_ica[0], h_freq=None)
-        raw_ica.filter(l_freq=None, h_freq=self.filter_bands_ica[1])
-        raw_ica.notch_filter(freqs=self.notch_freqs, notch_widths=1.0)
-        if raw_ica.info["sfreq"] > self.downsample_ica:
-            raw_ica.resample(self.downsample_ica)
-        raw_ica.set_eeg_reference(ref_channels="average")
-
-        # Fixed-length epochs; reject annotated bad segments
-        epochs = mne.make_fixed_length_epochs(
-            raw_ica, duration=1.0, preload=True, reject_by_annotation=True
-        )
-
-        # Drop noisy epochs via FASTER
-        bad_epochs = mne_faster.find_bad_epochs(epochs)
-        if len(bad_epochs) > 0:
-            epochs.drop(bad_epochs)
+        # --- ASR ---
+        if self.asr_cutoff is False:
+            raw_asr = raw_minimal.copy()
+        else:
+            raw_asr = compute_asr(raw_minimal, cutoff=self.asr_cutoff)
 
         # --- ICA ---
-        ica = mne.preprocessing.ICA(
-            n_components=None,
-            random_state=self.rng_seed,
-            method="picard",
-            fit_params=dict(ortho=False, extended=True),
+        ica, ic_labels = compute_ica(
+            raw_asr,
+            filter_bands_ica=self.filter_bands_ica,
+            notch_freqs=self.notch_freqs,
+            downsample_ica=self.downsample_ica,
+            thresh=self.thresh,
+            rng_seed=self.rng_seed,
+            exclude_labels=self.exclude_labels,
+            include_labels=self.include_labels,
         )
-        ica.fit(epochs)
-
-        ic_labels = mne_icalabel.label_components(epochs, ica, method="iclabel")
-
-        keep_labels = {"brain", "other"}
-        ica.exclude = [
-            idx
-            for idx, (label, prob) in enumerate(
-                zip(ic_labels["labels"], ic_labels["y_pred_proba"])
-            )
-            if label not in keep_labels and prob >= self.thresh
-        ]
 
         # --- Apply ICA, avg-ref, interpolate ---
-        raw_clean = ica.apply(raw_minimal.copy())
+        raw_clean = ica.apply(raw_asr.copy())
         raw_clean.set_eeg_reference(ref_channels="average")
         raw_minimal.set_eeg_reference(ref_channels="average")
         raw_clean.interpolate_bads(reset_bads=True, method="spline")
 
-        # --- ASR ---
-        asr = ASR(sfreq=raw_clean.info["sfreq"], cutoff=self.asr_cutoff)
-        eeg_idx = mne.pick_types(raw_clean.info, eeg=True)
-        eeg_data = raw_clean.get_data(picks="eeg")
-        asr.fit(eeg_data)
-        eeg_clean_asr = asr.transform(eeg_data)
-        raw_asr = raw_clean.copy()
-        raw_asr._data[eeg_idx] = eeg_clean_asr
-
-        # --- Save ---
-        fname_out.parent.mkdir(parents=True, exist_ok=True)
-        raw_minimal.save(
-            fname_out.with_name(fname_out.name + "_minimal.fif.gz"), overwrite=overwrite
-        )
-        raw_clean.save(
-            fname_out.with_name(fname_out.name + "_clean.fif.gz"), overwrite=overwrite
-        )
-        raw_asr.save(
-            fname_out.with_name(fname_out.name + "_asr.fif.gz"), overwrite=overwrite
-        )
-        ica.save(
-            fname_out.with_name(fname_out.name + "_ica.fif.gz"), overwrite=overwrite
-        )
-
-        with open(fname_out.with_name(fname_out.name + "_bad_channels.json"), "w") as f:
-            json.dump(bad_ch_dict, f, indent=4, cls=NumpyEncoder)
-        with open(fname_out.with_name(fname_out.name + "_iclabels.json"), "w") as f:
-            json.dump(ic_labels, f, indent=4, cls=NumpyEncoder)
+        # --- Save (optional) ---
+        if fname_out is not None:
+            fname_out = Path(fname_out).with_suffix("")
+            fname_out.parent.mkdir(parents=True, exist_ok=True)
+            raw_minimal.save(
+                fname_out.with_name(fname_out.name + "_minimal.fif.gz"),
+                overwrite=overwrite,
+            )
+            raw_clean.save(
+                fname_out.with_name(fname_out.name + "_clean.fif.gz"),
+                overwrite=overwrite,
+            )
+            if self.asr_cutoff is not False:
+                raw_asr.save(
+                    fname_out.with_name(fname_out.name + "_asr.fif.gz"),
+                    overwrite=overwrite,
+                )
+            ica.save(
+                fname_out.with_name(fname_out.name + "_ica.fif.gz"), overwrite=overwrite
+            )
+            with open(
+                fname_out.with_name(fname_out.name + "_bad_channels.json"), "w"
+            ) as f:
+                json.dump(bad_ch_dict, f, indent=4, cls=NumpyEncoder)
+            with open(fname_out.with_name(fname_out.name + "_iclabels.json"), "w") as f:
+                json.dump(ic_labels, f, indent=4, cls=NumpyEncoder)
 
         return raw_minimal, raw_clean, raw_asr, ica, ic_labels, bad_ch_dict

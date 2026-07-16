@@ -11,14 +11,12 @@ from pathlib import Path
 import matplotlib
 import matplotlib.pyplot as plt
 import mne
-import mne_faster
-import mne_icalabel
 import numpy as np
 from dataqa import get_bad_chs
-from meegkit.asr import ASR
 from standard_scripts import plot_ERP
 
 from bpn_analysis import XDFLoader
+from bpn_analysis.preproc import compute_asr, compute_ica
 
 # %% Constants & Settings
 
@@ -257,7 +255,7 @@ def run_preprocessing(
     asr_cutoff : float
         ASR cutoff parameter (standard deviations above the clean baseline
         before a component is reconstructed).  Lower = more aggressive.
-        Typical range 5–20; default 20 is conservative.
+        Typical range 5-20; default 20 is conservative.
     rng_seed : int | None
         Random seed for ICA reproducibility.
     overwrite : bool
@@ -272,8 +270,6 @@ def run_preprocessing(
     ic_labels   : dict
     bad_ch_dict : dict
     """
-    from pathlib import Path
-
     fname_out = Path(fname_out).with_suffix("")
     raw = LOADER.load(fname_in)
 
@@ -297,46 +293,15 @@ def run_preprocessing(
     # raw_minimal.notch_filter(freqs=notch_freqs, notch_widths=1.0)
     raw_minimal.set_eeg_reference(ref_channels="average", projection=True)
 
-    # Prepare ICA copy: stricter HP, downsample, avg-ref
-    raw_ica = raw.copy().pick("eeg")
-
-    raw_ica.filter(l_freq=filter_bands_ica[0], h_freq=None)
-    raw_ica.filter(l_freq=None, h_freq=filter_bands_ica[1])
-
-    raw_ica.notch_filter(freqs=notch_freqs, notch_widths=1.0)
-    if raw_ica.info["sfreq"] > downsample_ica:
-        raw_ica.resample(downsample_ica)
-    raw_ica.set_eeg_reference(ref_channels="average")
-
-    # Fixed-length epochs, reject annotated bads
-    epochs = mne.make_fixed_length_epochs(
-        raw_ica, duration=1.0, preload=True, reject_by_annotation=True
+    ica, ic_labels = compute_ica(
+        raw,
+        filter_bands_ica=filter_bands_ica,
+        notch_freqs=notch_freqs,
+        downsample_ica=downsample_ica,
+        thresh=thresh,
+        rng_seed=rng_seed,
+        include_labels={"brain", "other"},
     )
-
-    # Drop noisy epochs via FASTER
-    bad_epochs = mne_faster.find_bad_epochs(epochs)
-    if len(bad_epochs) > 0:
-        epochs.drop(bad_epochs)
-
-    ica = mne.preprocessing.ICA(
-        n_components=None,
-        random_state=rng_seed,
-        method="picard",
-        fit_params=dict(ortho=False, extended=True),
-    )
-    ica.fit(epochs)
-
-    ic_labels = mne_icalabel.label_components(epochs, ica, method="iclabel")
-
-    keep_labels = {"brain", "other"}
-    exclude_idx = [
-        idx
-        for idx, (label, prob) in enumerate(
-            zip(ic_labels["labels"], ic_labels["y_pred_proba"])
-        )
-        if label not in keep_labels and prob >= thresh
-    ]
-    ica.exclude = exclude_idx
 
     # Apply ICA, avg-ref, interpolate bad channels
     raw_clean = ica.apply(raw_minimal.copy())
@@ -344,18 +309,7 @@ def run_preprocessing(
     raw_minimal.set_eeg_reference(ref_channels="average")
     raw_clean.interpolate_bads(reset_bads=True, method="spline")
 
-    # ASR — fit on ICA-cleaned data, apply to produce raw_asr
-    # ASR calibrates on artifact-free windows (selected automatically) and
-    # reconstructs artifact-contaminated subspaces in the full recording.
-    # raw_asr is a copy of raw_clean with residual non-stationary artifacts
-    # (e.g. movement bursts) further suppressed.
-    asr = ASR(sfreq=raw_clean.info["sfreq"], cutoff=asr_cutoff)
-    eeg_idx = mne.pick_types(raw_clean.info, eeg=True)
-    eeg_data = raw_clean.get_data(picks="eeg")
-    asr.fit(eeg_data)
-    eeg_clean_asr = asr.transform(eeg_data)
-    raw_asr = raw_clean.copy()
-    raw_asr._data[eeg_idx] = eeg_clean_asr
+    raw_asr = compute_asr(raw_clean, cutoff=asr_cutoff)
 
     # Save
     fname_out.parent.mkdir(parents=True, exist_ok=True)

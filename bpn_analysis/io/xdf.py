@@ -17,9 +17,28 @@ import scipy.signal
 
 logger = logging.getLogger(__name__)
 
-MICROVOLT_UNITS = ("microvolt", "microvolts", "µV", "μV", "uV")
+_MICROVOLT_UNITS = frozenset(("microvolt", "microvolts", "µv", "μv", "uv"))
+_VOLT_UNITS = frozenset(("v", "volt", "volts"))
 
 # %% Helper functions
+
+
+def _unit_scale(unit: str, ch_name: str = "") -> float:
+    """Return scale factor to convert *unit* to SI volts (case-insensitive).
+
+    Emits a warning for unrecognised units so silent identity scaling is visible.
+    """
+    normed = unit.strip().lower()
+    if normed in _MICROVOLT_UNITS:
+        return 1e-6
+    if normed not in _VOLT_UNITS and normed not in ("na", ""):
+        logger.warning(
+            "Unrecognised unit '%s' for channel '%s' — assuming volts "
+            "(no scaling applied).",
+            unit,
+            ch_name,
+        )
+    return 1.0
 
 
 def _match_stream(
@@ -221,7 +240,7 @@ class XDFLoader:
 
         labels, types, units = _extract_channel_info(eeg_stream)
         sfreq = float(np.array(eeg_stream["info"]["effective_srate"]).item())
-        scale = np.array([1e-6 if u in MICROVOLT_UNITS else 1.0 for u in units])
+        scale = np.array([_unit_scale(u, ch) for u, ch in zip(units, labels)])
 
         start_time = eeg_stream["time_stamps"][0]
         end_time = eeg_stream["time_stamps"][-1]

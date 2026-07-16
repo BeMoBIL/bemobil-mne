@@ -16,3 +16,5 @@ reports/
 qa_reports/
 .claude/
 .claude
+
+pyrightconfig.json
