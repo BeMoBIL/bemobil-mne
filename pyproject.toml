@@ -19,8 +19,10 @@ classifiers = [
 ]
 dependencies = [
   "matplotlib",
+  "meegkit",
   "mne",
   "mne_bids",
+  "mne-denoise",
   "mne-faster",
   "mne-icalabel",
   "nibabel",
