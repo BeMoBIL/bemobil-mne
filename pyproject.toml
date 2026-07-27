@@ -31,6 +31,7 @@ dependencies = [
   "pandas",
   "plotly",
   "pylsl",
+  "pybv",
   "pyprep",
   "python-picard",
   "scikit-learn",
@@ -55,19 +56,12 @@ requires-python = ">=3.10"
 # Dependencies for developer installations
 dev = ["build", "BPN-analysis[test]", "ipykernel", "ipython", "pre-commit", "ruff", "twine"]
 # Dependencies for running the test infrastructure
-test = ["BPN-analysis", "pytest", "pytest-cov", "pytest-sugar"]
+test = ["BPN-analysis", "pytest", "pytest-cov", "pytest-sugar", "pytest-xdist"]
 
 [project.urls]
 "Bug Tracker" = "https://github.com/Randomidous/BPN-analysis/issues/"
 "Documentation" = "https://github.com/Randomidous/BPN-analysis/"
 "Source Code" = "https://github.com/Randomidous/BPN-analysis/"
-
-[tool.coverage.report]
-# Regexes for lines to exclude from consideration
-exclude_lines = ["if 0:", "if __name__ == .__main__.:", "pragma: no cover"]
-
-[tool.coverage.run]
-omit = ["*tests*"]
 
 [tool.hatch.build]
 exclude = [
@@ -86,10 +80,24 @@ raw-options = {version_scheme = "release-branch-semver"}
 source = "vcs"
 
 [tool.pytest.ini_options]
-addopts = """--durations=20 -ra --junit-xml=junit-results.xml --tb=short
-    --ignore=doc --ignore=examples --ignore=mne_bids/tests/data"""
+addopts = """--cov=bpn_analysis --cov-report=html --cov-config=pyproject.toml
+    --durations=20 -ra --junit-xml=junit-results.xml --tb=short
+    --ignore=doc --ignore=examples --ignore=mne_bids/tests/data -n auto"""
 filterwarnings = [
+  "ignore::ImportWarning",
+  "ignore::DeprecationWarning:mne",
 ]
+testpaths = ["tests"]
+
+[tool.coverage.run]
+omit = ["*tests*", "bpn_analysis/analysis/*", "bpn_analysis/examples/*"]
+source = ["bpn_analysis"]
+# Required for pytest-xdist: each worker writes its own .coverage.* file
+# which coverage combine merges at the end.
+parallel = true
+
+[tool.coverage.report]
+exclude_lines = ["if 0:", "if __name__ == .__main__.:", "pragma: no cover"]
 
 [tool.ruff.lint]
 exclude = ["__init__.py"]
