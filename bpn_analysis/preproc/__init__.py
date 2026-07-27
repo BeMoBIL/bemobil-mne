@@ -6,7 +6,11 @@ from bpn_analysis.preproc.motion import (
     process_rigid_body,
     split_by_rigid_body,
 )
-from bpn_analysis.preproc.preprocessing import EEGPreprocessor, NumpyEncoder, get_bad_chs
+from bpn_analysis.preproc.preprocessing import (
+    EEGPreprocessor,
+    NumpyEncoder,
+    get_bad_chs,
+)
 from bpn_analysis.preproc.utils import (
     FRONTAL_CHS_EQUIDISTANT,
     StepTimer,
