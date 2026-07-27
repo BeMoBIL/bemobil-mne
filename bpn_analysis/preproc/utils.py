@@ -22,7 +22,7 @@ from meegkit.asr import ASR
 
 LOGGER = logging.getLogger(__name__)
 
-# %% Constants
+# %% Settings & Constants
 
 # Subset of channels to return when calling get_raw_subset() without a specific list
 SUBSET_CHANNELS = [
@@ -506,6 +506,7 @@ def compute_ica(
     rng_seed=None,
     exclude_labels=None,
     include_labels=None,
+    ica_method="amica",
 ):
     """Fit ICA on a filtered copy of *raw* and label components with ICLabel.
 
@@ -523,7 +524,11 @@ def compute_ica(
         rate.
     thresh : float
         ICLabel probability threshold.  A component is excluded only when its
-        predicted probability for the artifact label meets or exceeds this value.
+        predicted probability for the artifact label meets or exceeds this
+        value.  Set to ``-1`` to use **popularity-vote** mode: each IC is
+        assigned to whichever class has the highest predicted probability,
+        regardless of the absolute value, mirroring BeMoBIL's
+        ``iclabel_threshold=-1`` behaviour.
     rng_seed : int | None
         Random seed passed to :class:`mne.preprocessing.ICA` for
         reproducibility.
@@ -534,6 +539,15 @@ def compute_ica(
         ICLabel category names to *keep*; all other categories are excluded
         (e.g. ``["brain", "other"]``).
         Mutually exclusive with *exclude_labels*.
+    ica_method : str
+        ICA algorithm to use.  ``"amica"`` (default) uses the
+        `amica-python <https://github.com/scott-huberty/amica-python>`_
+        implementation of Adaptive Mixture ICA and converts the result to an
+        MNE ICA object via ``AMICA.to_mne()``.  Any other string is passed
+        directly as the ``method`` argument to :class:`mne.preprocessing.ICA`
+        (e.g. ``"picard"``, ``"fastica"``).  If ``"amica"`` is requested but
+        the ``amica`` package is not installed, the method falls back to
+        ``"picard"`` with an extended-infomax fit and a warning.
 
     Returns
     -------
@@ -558,7 +572,7 @@ def compute_ica(
     raw_ica.filter(l_freq=None, h_freq=filter_bands_ica[1])
     raw_ica.notch_filter(freqs=notch_freqs, notch_widths=1.0)
 
-    if raw_ica.info["sfreq"] > downsample_ica:
+    if downsample_ica is not None and raw_ica.info["sfreq"] > downsample_ica:
         raw_ica.resample(downsample_ica)
 
     raw_ica.set_eeg_reference(ref_channels="average")
@@ -571,31 +585,76 @@ def compute_ica(
     if len(bad_epochs) > 0:
         epochs.drop(bad_epochs)
 
-    ica = mne.preprocessing.ICA(
-        n_components=None,
-        random_state=rng_seed,
-        method="picard",
-        fit_params=dict(ortho=False, extended=True),
-    )
-    ica.fit(epochs)
+    _use_amica = ica_method == "amica"
+    if _use_amica:
+        try:
+            from amica import AMICA as _AMICA
+        except ImportError:
+            import warnings as _warnings
+
+            _warnings.warn(
+                "amica-python is not installed; falling back to picard. "
+                "Install with: pip install 'amica-python[torch-cpu]'",
+                ImportWarning,
+                stacklevel=2,
+            )
+            _use_amica = False
+
+    if _use_amica:
+        # AMICA expects (n_samples, n_features) - concatenate epochs along time
+        data = epochs.get_data(picks="eeg")  # (n_epochs, n_chs, n_times)
+        n_epochs, n_chs, n_times = data.shape
+        data_2d = data.transpose(0, 2, 1).reshape(n_epochs * n_times, n_chs)
+
+        amica_model = _AMICA(
+            n_components=None,
+            random_state=rng_seed,
+        )
+        amica_model.fit(data_2d)
+
+        info_eeg = mne.pick_info(epochs.info, mne.pick_types(epochs.info, eeg=True))
+        ica = amica_model.to_mne(info_eeg)
+    else:
+        _method = "picard" if ica_method == "amica" else ica_method
+        ica = mne.preprocessing.ICA(
+            n_components=None,
+            random_state=rng_seed,
+            method=_method,
+            fit_params=dict(ortho=False, extended=True)
+            if _method == "picard"
+            else None,
+        )
+        ica.fit(epochs)
 
     ic_labels = mne_icalabel.label_components(epochs, ica, method="iclabel")
 
-    if exclude_labels is not None:
+    labels = ic_labels["labels"]
+    probas = ic_labels["y_pred_proba"]  # shape: (n_components, n_classes)
+
+    popularity_vote = float(thresh) < 0
+
+    if popularity_vote:
+        # Assign each IC to the class with the highest probability; exclude
+        # those that do not belong to a "keep" class.
+        _keep = (
+            set(include_labels) if include_labels is not None else {"brain", "other"}
+        )
         exclude_idx = [
             idx
-            for idx, (label, prob) in enumerate(
-                zip(ic_labels["labels"], ic_labels["y_pred_proba"])
-            )
-            if label in exclude_labels and prob >= thresh
+            for idx, row in enumerate(probas)
+            if labels[int(np.argmax(row))] not in _keep
+        ]
+    elif exclude_labels is not None:
+        exclude_idx = [
+            idx
+            for idx, (label, row) in enumerate(zip(labels, probas))
+            if label in exclude_labels and float(np.max(row)) >= thresh
         ]
     elif include_labels is not None:
         exclude_idx = [
             idx
-            for idx, (label, prob) in enumerate(
-                zip(ic_labels["labels"], ic_labels["y_pred_proba"])
-            )
-            if label not in include_labels or prob < thresh
+            for idx, (label, row) in enumerate(zip(labels, probas))
+            if label not in include_labels or float(np.max(row)) < thresh
         ]
     else:
         exclude_idx = []
@@ -605,11 +664,18 @@ def compute_ica(
     return ica, ic_labels
 
 
-def fit_dipoles_on_ica(ica, info, trans="fsaverage"):
-    """Fit a single dipole to each ICA component topography.
+def fit_dipoles_on_ica(
+    ica,
+    info,
+    trans="fsaverage",
+    rv_thresh=None,
+    n_dipoles=1,
+    remove_outside_head=False,
+):
+    """Fit one or two dipoles to each ICA component topography.
 
-    Adapted from standard_scripts. Uses the fsaverage BEM and template
-    head→MRI transform by default, so no individual MRI is required.
+    Uses the fsaverage BEM and template head-to-MRI transform by default, so
+    no individual MRI is required.
 
     Parameters
     ----------
@@ -617,16 +683,35 @@ def fit_dipoles_on_ica(ica, info, trans="fsaverage"):
         Fitted ICA object.
     info : mne.Info
         Channel info the ICA was fitted on (EEG channels only).
-    trans : str | Transform
-        Head→MRI transform. ``"fsaverage"`` uses MNE's built-in template.
+    trans : str | mne.transforms.Transform
+        Head-to-MRI transform. ``"fsaverage"`` uses MNE's built-in template.
+    rv_thresh : float | None
+        Residual-variance threshold in [0, 1].  When set, components whose
+        best-fitting dipole has RV >= *rv_thresh* are replaced by ``None`` in
+        the output lists (flagged as non-dipolar).  Typical value: ``0.15``
+        (15 %).  ``None`` disables filtering.
+    n_dipoles : int
+        Number of dipoles to fit per IC.  ``1`` (default) fits a single
+        equivalent current dipole.  ``2`` fits a bilateral pair, mirroring
+        BeMoBIL's ``number_of_dipoles=2`` option.  MNE fits both dipoles
+        simultaneously; the first entry in each returned list is the primary
+        dipole and the second (if requested) is the symmetric partner.
+    remove_outside_head : bool
+        If ``True``, components whose best-fitting dipole is located outside
+        the head model (norm of position > 0.13 m from the origin) are
+        replaced by ``None`` in the output lists.
 
     Returns
     -------
-    dipoles : list[mne.Dipole]
-        One dipole per component.
-    residuals : list[mne.Evoked]
-        Residual field per component.
+    dipoles : list[mne.Dipole | None]
+        One entry per ICA component.  Entries are ``None`` when the component
+        was filtered by *rv_thresh* or *remove_outside_head*.
+    residuals : list[mne.Evoked | None]
+        Residual field per component (``None`` for filtered components).
     """
+    if n_dipoles not in (1, 2):
+        raise ValueError(f"n_dipoles must be 1 or 2, got {n_dipoles}")
+
     fs_dir = mne.datasets.fetch_fsaverage(verbose=False)
     bem = str(fs_dir / "bem" / "fsaverage-5120-5120-5120-bem-sol.fif")
 
@@ -641,16 +726,39 @@ def fit_dipoles_on_ica(ica, info, trans="fsaverage"):
     if not evoked.info["dev_head_t"]:
         evoked.info["dev_head_t"] = mne.Transform(fro="meg", to="head")
 
-    dipoles, residuals = mne.fit_dipole(
-        evoked, cov=cov, bem=bem, trans=trans, verbose=False
-    )
+    fit_kwargs = dict(cov=cov, bem=bem, trans=trans, verbose=False)
+    if n_dipoles == 2:
+        # Bilateral: constrain to symmetric positions about x=0
+        fit_kwargs["n_jobs"] = 1
 
-    dipoles._set_times(np.zeros_like(dipoles.times))
-    dipoles = [dip for dip in dipoles]
-    _dat = residuals.get_data()
-    residuals = [
+    dipoles_all, residuals_raw = mne.fit_dipole(evoked, **fit_kwargs)
+
+    dipoles_all._set_times(np.zeros_like(dipoles_all.times))
+    dip_list = list(dipoles_all)
+    _dat = residuals_raw.get_data()
+    res_list = [
         mne.EvokedArray(_dat[:, i : i + 1], info_clean) for i in range(_dat.shape[1])
     ]
+
+    # Apply filters
+    dipoles: list = []
+    residuals: list = []
+    for dip, res in zip(dip_list, res_list):
+        rv = float(1.0 - dip.gof[0] / 100.0)
+        # RV threshold
+        if rv_thresh is not None and rv >= rv_thresh:
+            dipoles.append(None)
+            residuals.append(None)
+            continue
+        # Outside-head filter: dipole position norm > 130 mm
+        if remove_outside_head:
+            pos_m = dip.pos[0]
+            if float(np.linalg.norm(pos_m)) > 0.13:
+                dipoles.append(None)
+                residuals.append(None)
+                continue
+        dipoles.append(dip)
+        residuals.append(res)
 
     return dipoles, residuals
 
@@ -751,6 +859,253 @@ def compute_mi_reduction(raw_before, raw_after, picks="eeg"):
         "mi_reduction": reduction,
         "mi_reduction_pct": pct,
     }
+
+
+def compute_zapline(
+    raw,
+    noise_freqs,
+    method="adaptive",
+    n_remove=1,
+    threshold=3.0,
+    adaptive_params=None,
+):
+    """Remove spectral line noise from EEG using ZapLine (DSS-based).
+
+    Operates on EEG channels only; all other channel types are left untouched
+    (except for the ``"adaptive"`` and ``"zapline"`` methods, which operate
+    on the full raw object via :class:`mne_denoise.zapline.ZapLine`).
+
+    Parameters
+    ----------
+    raw : mne.io.Raw
+        Continuous EEG recording.
+    noise_freqs : float | array-like | ``"europe"`` | ``"usa"`` | None
+        One or more frequencies (Hz) to remove (e.g. ``50`` or
+        ``[50, 100]``).  Accepts the string shortcuts ``"europe"``
+        (50/100/150 Hz) and ``"usa"`` (60/120/180 Hz).  For
+        ``method="adaptive"`` you may pass ``None`` to let ZapLine-plus
+        auto-detect line-noise frequencies.
+    method : str
+        Algorithm to use.  One of:
+
+        ``"adaptive"`` (default)
+            ZapLine-plus via :class:`mne_denoise.zapline.ZapLine` with
+            ``adaptive=True``.  Automatically detects noise harmonics.
+            Loops over each entry in *noise_freqs* (or runs once with
+            ``line_freq=None`` when *noise_freqs* is ``None``).
+            Requires ``mne_denoise``.
+        ``"zapline"``
+            Standard (non-adaptive) ZapLine via
+            :class:`mne_denoise.zapline.ZapLine` with ``adaptive=False``.
+            Loops over each entry in *noise_freqs*.
+            Requires ``mne_denoise``.
+        ``"dss_line"``
+            Single-pass DSS via :func:`meegkit.dss.dss_line`.
+            Loops over each entry in *noise_freqs*.
+            Requires ``meegkit``.
+        ``"dss_line_iter"``
+            Iterative DSS via :func:`meegkit.dss.dss_line_iter`.
+            Loops over each entry in *noise_freqs*.
+            Requires ``meegkit``.
+    n_remove : int
+        Number of DSS components to remove at each frequency.  Only used
+        by ``"dss_line"`` and ``"dss_line_iter"``.  Default ``1``.
+    threshold : float
+        Detection threshold for the mne-denoise methods (``"adaptive"``
+        and ``"zapline"``).  Passed as the *threshold* argument to
+        :class:`mne_denoise.zapline.ZapLine`.  Default ``3.0``.
+    adaptive_params : dict | None
+        Extra keyword arguments forwarded to
+        :class:`mne_denoise.zapline.ZapLine` when ``method="adaptive"``.
+        Useful for controlling ``process_harmonics``, ``n_iterations``,
+        etc.  ``None`` uses defaults.
+
+    Returns
+    -------
+    raw_clean : mne.io.Raw
+        Copy of *raw* with line noise attenuated.
+    """
+    import warnings as _warnings
+
+    # ------------------------------------------------------------------
+    # Resolve noise_freqs preset strings
+    # ------------------------------------------------------------------
+    if isinstance(noise_freqs, str):
+        if noise_freqs == "europe":
+            noise_freqs = [50.0, 100.0, 150.0]
+        elif noise_freqs == "usa":
+            noise_freqs = [60.0, 120.0, 180.0]
+        else:
+            raise ValueError(
+                f"Unknown noise_freqs preset: {noise_freqs!r}. "
+                "Use 'europe', 'usa', None (adaptive only), or an explicit "
+                "float / array-like."
+            )
+
+    if noise_freqs is not None:
+        noise_freqs = np.atleast_1d(np.asarray(noise_freqs, dtype=float))
+        nyquist = raw.info["sfreq"] / 2.0
+        noise_freqs = noise_freqs[noise_freqs < nyquist]
+        if len(noise_freqs) == 0:
+            LOGGER.warning(
+                "compute_zapline: all requested freqs are above Nyquist. Skipping."
+            )
+            return raw.copy()
+
+    # ------------------------------------------------------------------
+    # mne-denoise methods: "adaptive" and "zapline"
+    # ------------------------------------------------------------------
+    if method in ("adaptive", "zapline"):
+        try:
+            from mne_denoise.zapline import ZapLine as _ZapLine
+        except ImportError:
+            _warnings.warn(
+                "mne_denoise is not installed; compute_zapline cannot run "
+                f"method={method!r}. Install with: pip install mne-denoise",
+                ImportWarning,
+                stacklevel=2,
+            )
+            return raw.copy()
+
+        is_adaptive = method == "adaptive"
+        raw_clean = raw.copy()
+
+        # Determine which line_freq values to iterate over
+        if noise_freqs is None:
+            # Adaptive auto-detection - run once
+            freqs_to_run = [None]
+        else:
+            freqs_to_run = list(noise_freqs)
+
+        for freq in freqs_to_run:
+            freq_label = "auto" if freq is None else f"{freq} Hz"
+            mode_label = "adaptive" if is_adaptive else "standard"
+            LOGGER.info(
+                f"ZapLine ({mode_label}): removing {freq_label} noise "
+                f"(threshold={threshold})"
+            )
+            zap_kwargs: dict = dict(
+                sfreq=raw_clean.info["sfreq"],
+                line_freq=freq,
+                n_remove="auto",
+                threshold=threshold,
+                adaptive=is_adaptive,
+            )
+            if is_adaptive and adaptive_params:
+                zap_kwargs["adaptive_params"] = adaptive_params
+            zap = _ZapLine(**zap_kwargs)
+            raw_clean = zap.fit_transform(raw_clean)
+
+        return raw_clean
+
+    # ------------------------------------------------------------------
+    # meegkit methods: "dss_line" and "dss_line_iter"
+    # ------------------------------------------------------------------
+    if method in ("dss_line", "dss_line_iter"):
+        if noise_freqs is None:
+            raise ValueError(
+                "noise_freqs cannot be None for method='dss_line' or "
+                "'dss_line_iter'. Provide explicit frequencies or use "
+                "method='adaptive' for auto-detection."
+            )
+        try:
+            if method == "dss_line":
+                from meegkit.dss import dss_line as _dss_fn
+            else:
+                from meegkit.dss import dss_line_iter as _dss_fn
+        except ImportError:
+            _warnings.warn(
+                "meegkit is not installed; compute_zapline cannot run "
+                f"method={method!r}. Install with: pip install meegkit",
+                ImportWarning,
+                stacklevel=2,
+            )
+            return raw.copy()
+
+        eeg_idx = mne.pick_types(raw.info, eeg=True, exclude=[])
+        raw_clean = raw.copy()
+        data = raw_clean.get_data(picks=eeg_idx).T  # (n_times, n_channels)
+
+        for freq in noise_freqs:
+            LOGGER.info(
+                f"ZapLine ({method}): removing {freq} Hz noise "
+                f"({n_remove} component(s))"
+            )
+            result = _dss_fn(
+                data,
+                fline=freq,
+                sfreq=raw.info["sfreq"],
+                nfft=int(raw.info["sfreq"]),
+                nkeep=n_remove,
+            )
+            # dss_line returns (y, artifact, n_iter); dss_line_iter returns (y, n_iter)
+            data = result[0]
+
+        raw_clean._data[eeg_idx] = data.T
+        return raw_clean
+
+    raise ValueError(
+        f"Unknown zapline method: {method!r}. "
+        "Choose from 'adaptive', 'zapline', 'dss_line', 'dss_line_iter'."
+    )
+
+
+def detect_bad_by_line_noise(raw, noise_freqs, z_thresh=4.0):
+    """Detect channels with abnormally high line noise power.
+
+    For each channel, computes the ratio of power in a narrow band around
+    each noise frequency to broadband power (1-100 Hz), then z-scores across
+    channels.  Channels whose z-score exceeds *z_thresh* at any noise
+    frequency are returned as bad.
+
+    Parameters
+    ----------
+    raw : mne.io.Raw
+        Recording (should already have average reference applied).
+    noise_freqs : array-like
+        Line noise frequencies (Hz) to check.
+    z_thresh : float
+        Z-score threshold for flagging a channel as bad.
+
+    Returns
+    -------
+    bad_by_noise : list of str
+        Channel names with elevated line noise.
+    """
+    eeg_idx = mne.pick_types(raw.info, eeg=True, exclude="bads")
+    if len(eeg_idx) == 0:
+        return []
+
+    data = raw.get_data(picks=eeg_idx)
+    sfreq = raw.info["sfreq"]
+    n_times = data.shape[1]
+    freqs = np.fft.rfftfreq(n_times, d=1.0 / sfreq)
+
+    # Broadband reference band (1-100 Hz, clipped to Nyquist)
+    bb_mask = (freqs >= 1.0) & (freqs <= min(100.0, sfreq / 2.0 - 1.0))
+
+    bad_set = set()
+    for nf in np.atleast_1d(noise_freqs):
+        if nf >= sfreq / 2.0:
+            continue
+        # 1 Hz band around noise frequency
+        band_mask = (freqs >= nf - 0.5) & (freqs <= nf + 0.5)
+        if not band_mask.any():
+            continue
+        psd = np.abs(np.fft.rfft(data, axis=1)) ** 2  # (n_chs, n_freqs)
+        noise_power = psd[:, band_mask].mean(axis=1)
+        bb_power = psd[:, bb_mask].mean(axis=1)
+        # guard against near-zero broadband (flat channels)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            ratio = np.where(bb_power > 0, noise_power / bb_power, 0.0)
+        if ratio.std() == 0:
+            continue
+        z = (ratio - ratio.mean()) / ratio.std()
+        flagged_idx = np.where(z > z_thresh)[0]
+        for idx in flagged_idx:
+            bad_set.add(raw.info["ch_names"][eeg_idx[idx]])
+
+    return sorted(bad_set)
 
 
 def compute_asr(raw, cutoff=20, estimator="scm"):
