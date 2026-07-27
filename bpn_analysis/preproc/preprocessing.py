@@ -14,9 +14,7 @@ import mne_faster
 import numpy as np
 from pyprep import NoisyChannels
 
-from bpn_analysis.preproc.utils import (
-    NumpyEncoder as _NumpyEncoder,  # re-exported below as NumpyEncoder
-)
+from bpn_analysis.io.utils import NumpyEncoder as _NumpyEncoder
 from bpn_analysis.preproc.utils import (
     StepTimer,
     _annotate_break_iter,
@@ -288,6 +286,10 @@ class EEGPreprocessor:
         If ``True`` *and* ``overwrite=False``, skip the entire computation
         when the primary output file ``{fname_out}_clean.fif.gz`` already
         exists and return the previously saved results instead.
+    make_report : bool
+        If ``True`` and *fname_out* is provided, generate an
+        :class:`mne.Report` summarising the preprocessing outputs and save it
+        alongside the other derivatives as ``{fname_out}_report.html``.
     """
 
     def __init__(
@@ -322,6 +324,7 @@ class EEGPreprocessor:
         rv_thresh: float | None = None,
         remove_outside_head: bool = False,
         skip_if_exists: bool = False,
+        make_report: bool = False,
     ):
         if not fit_ica and fit_dipoles:
             raise ValueError(
@@ -370,6 +373,7 @@ class EEGPreprocessor:
         self.rv_thresh = rv_thresh
         self.remove_outside_head = remove_outside_head
         self.skip_if_exists = skip_if_exists
+        self.make_report = make_report
 
     # ------------------------------------------------------------------
     # Public entry points
@@ -812,6 +816,25 @@ class EEGPreprocessor:
                 overwrite=overwrite,
                 verbose="error",
             )
+
+        if self.make_report:
+            from bpn_analysis.preproc.make_report import make_report as _make_report
+
+            report = _make_report(
+                raw_minimal=raw_minimal,
+                raw_clean=raw_clean,
+                ica=ica,
+                ic_labels=ic_labels,
+                dipoles=dipoles,
+                residuals=residuals,
+                trans=trans,
+                bad_ch_dict=bad_ch_dict,
+                fname_out=fname_out,
+                event_id=self.event_id,
+                thresh=self.thresh,
+            )
+            report_path = fname_out.with_name(fname_out.name + "_report.html")
+            report.save(str(report_path), overwrite=overwrite, open_browser=False)
 
     def _load_cached_outputs(self, fname_out):
         """Load previously saved pipeline outputs from *fname_out*.

@@ -6,6 +6,7 @@ from bpn_analysis.preproc.motion import (
     process_rigid_body,
     split_by_rigid_body,
 )
+from bpn_analysis.preproc.make_report import make_report
 from bpn_analysis.preproc.preprocessing import (
     EEGPreprocessor,
     NumpyEncoder,
@@ -37,6 +38,8 @@ from bpn_analysis.preproc.utils import (
 __all__ = [
     # Classes
     "EEGPreprocessor",
+    # Report
+    "make_report",
     "EpochPreparer",
     "NumpyEncoder",
     "StepTimer",
