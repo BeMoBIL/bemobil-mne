@@ -1,56 +1,73 @@
 # data-analysis
 
-Python repository for analysis utilities and project-specific scripts at BPN (Berlin Mobile Brain/Body Imaging Lab).
+Python repository for EEG and multimodal analysis utilities at BPN (Berlin Mobile Brain/Body Imaging Lab).
 
 ## Structure
 
 ```
 bpn_analysis/
-├── analysis/
-│   ├── mne_denoise/
-│   │   ├── denoise_comparison.py
-│   │   └── hip_preprocess.py
-│   └── other_projects/
-│       ├── project-specific-script-1.py
-│       └── project-specific-script-2.py
-├── io/                       # Data In/Out module
-│   ├── xdf.py                # Functions for reading XDF files
-│   └── other-io-utils.py     # Other I/O functions
-├── preproc/                  # Preprocessing module
-│   ├── epoching.py           # Epoching functions
-│   └── preprocessing.py      # Preprocessing functions
-├── viz/                      # Visualization module
-│   └── plotting.py           # Plotting functions
-└── data/                     # Values that convey information
-    ├── montages/             # EEG electrode montage files
-    │   ├── standard_MoBI_128.elc
-    │   └── standard_MoBI_128_corrected.fif
-    └── other-data/
+├── io/                          # Data I/O
+│   ├── xdf.py                   # XDFLoader: multimodal XDF loading, stream alignment
+│   ├── alignment.py             # align_stream_to_timestamps (timestamp-aware interpolation)
+│   ├── bids_export.py           # BIDS export wrappers around mne_bids
+│   └── utils.py                 # I/O helpers
+├── preproc/                     # Preprocessing
+│   ├── preprocessing.py         # EEGPreprocessor: filter -> bad ch -> ASR -> ICA pipeline
+│   ├── epoching.py              # EpochPreparer, stimulus renaming helpers
+│   ├── motion.py                # Rigid body kinematics (find, process, split)
+│   └── utils.py                 # ASR, ZapLine, ICA, dipole fitting, provenance, misc
+├── viz/                         # Visualization
+│   ├── plotting.py              # ERP, PSD, and component plots
+│   └── utils.py                 # Plot helpers
+├── analysis/                    # Project-specific analysis scripts
+│   ├── mne_denoise/             # MNE-denoise pipeline comparisons
+│   └── neuro_urban_walks/       # Neuro-urban walking study scripts
+├── examples/                    # Runnable example scripts
+│   ├── preprocess_and_plot.py   # Full EEG preprocessing + visualization walkthrough
+│   ├── xdf_loading.py           # XDF multimodal loading
+│   ├── motion_processing.py     # Rigid body kinematics
+│   └── bids_export_example.py   # BIDS export
+└── data/
+    └── montages/                # EEG electrode montage files (.elc, .fif)
 ```
 
+## Modules
 
-## Requirements
+**`io`** - Load XDF multimodal recordings into MNE Raw objects, align auxiliary streams (ECG, gaze, EMG) to a common time grid, and export datasets to BIDS.
 
-Managed via `pyproject.toml`. Install with:
-navigate to project folder
+**`preproc`** - Full EEG preprocessing pipeline (bandpass, bad channel detection, ASR, ICA, dipole fitting), epoch preparation, and rigid body motion capture kinematics.
+
+**`viz`** - ERP and PSD plotting utilities built on MNE and matplotlib.
+
+**`analysis`** - Project-specific scripts. Not part of the importable API.
+
+**`examples`** - Self-contained scripts demonstrating major features. Run directly or open as notebooks (percent-format cells).
+
+## Quick start
 
 ```bash
+# Navigate to the repo root, then install in editable mode
 pip install -e .
 ```
-Note: The `-e` flag installs the package in editable mode. This means whenever you make changes to the code in the `bpn_analysis` directory, those changes will be reflected immediately without needing to reinstall the package.
 
-## Usage
-
-Then, you can import the package in your Python scripts or interactive sessions:
 ```python
-import bpn_analysis
+from bpn_analysis.io import XDFLoader
+from bpn_analysis.preproc import EEGPreprocessor, find_rigid_bodies
+
+# Load a multimodal XDF recording
+loader = XDFLoader(montage="standard_1020")
+recording = loader.load("sub-01_task-walk_run-01.xdf")
+raw = recording.raw
 ```
 
-or
-```python
-from bpn_analysis import plot_ERP, plot_PSD
-```
+See `bpn_analysis/examples/` for complete worked examples:
 
+| Feature | Example script |
+|---------|---------------|
+| XDF multimodal loading | `examples/xdf_loading.py` |
+| EEG preprocessing pipeline | `examples/preprocess_and_plot.py` |
+| Rigid body kinematics | `examples/motion_processing.py` |
+| BIDS export | `examples/bids_export_example.py` |
 
 ## Contributing
 
@@ -60,28 +77,28 @@ This is a private repository for BPN lab members. Contributions are made via fea
 
 1. Clone the repo:
 ```bash
-   git clone https://github.com/Randomidous/data-analysis.git
-   cd data-analysis
+git clone https://github.com/Randomidous/data-analysis.git
+cd data-analysis
 ```
 2. Install in editable mode:
 ```bash
-   pip install -e .
+pip install -e .
 ```
 3. Install pre-commit hooks:
 ```bash
-   pre-commit install
+pre-commit install
 ```
 
 ### Workflow
 
 1. Create a branch from `main`:
 ```bash
-   git checkout -b your-git-name/short-description
+git checkout -b your-git-name/short-description
 ```
 2. Make your changes, commit often with clear messages
 3. Push your branch:
 ```bash
-   git push -u origin your-git-name/short-description
+git push -u origin your-git-name/short-description
 ```
 4. Open a pull request against `main` on GitHub
 5. Request a review from a lab member before merging
