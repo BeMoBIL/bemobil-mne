@@ -61,9 +61,7 @@ def _is_irregular(stream: dict) -> bool:
     """
     try:
         nominal = float(stream["info"]["nominal_srate"][0])
-        effective = float(
-            np.array(stream["info"].get("effective_srate", [0])).item()
-        )
+        effective = float(np.array(stream["info"].get("effective_srate", [0])).item())
     except (KeyError, ValueError, TypeError):
         nominal, effective = 0.0, 0.0
     return nominal == 0.0 and effective < 1.0

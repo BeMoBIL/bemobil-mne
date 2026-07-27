@@ -27,7 +27,7 @@ from bpn_analysis.io.alignment import (
     align_stream_to_timestamps,
 )
 
-# %% Constants & Settings
+# %% Settings & Constants
 
 logger = logging.getLogger(__name__)
 
@@ -145,7 +145,110 @@ def _extract_channel_info(stream: dict) -> tuple[list[str], list[str], list[str]
     if not units:
         units = ["NA"] * n_chans
 
+    labels = _shorten_fif_ch_names(labels)
     return labels, types, units
+
+
+# FIF format caps channel names at 15 characters.  This lookup table maps
+# known long names from Pupil Labs eye-tracking LSL streams to MNE-style
+# names that fit within the limit.
+#
+# MNE convention (from mne.io.eyelink): lowercase, ``_left`` / ``_right``
+# suffix for eye identity, ``_x`` / ``_y`` / ``_z`` for axis.  Channel types
+# ``"eyegaze"`` (gaze position) and ``"pupil"`` (pupil size) are MNE built-ins.
+# For 3D eyeball / optical-axis / eyelid channels that have no MNE built-in
+# we extend the same pattern: ``<metric>_<axis>_<eye>``.
+#
+# Pupil Labs indices: 0 = left eye, 1 = right eye.
+_FIF_CH_ABBREVIATIONS: dict[str, str] = {
+    # ---- Pupil diameter (MNE channel type: pupil) -----------------------
+    "PupilDiameter-0": "pupil_left",
+    "PupilDiameter-1": "pupil_right",
+    # ---- 3-D eyeball centre (MNE channel type: misc) --------------------
+    "EyeballCenterX-0": "eyeball_x_l",
+    "EyeballCenterY-0": "eyeball_y_l",
+    "EyeballCenterZ-0": "eyeball_z_l",
+    "EyeballCenterX-1": "eyeball_x_r",
+    "EyeballCenterY-1": "eyeball_y_r",
+    "EyeballCenterZ-1": "eyeball_z_r",
+    # ---- Optical axis (MNE channel type: misc) --------------------------
+    "OpticalAxisX-0": "optaxis_x_l",
+    "OpticalAxisY-0": "optaxis_y_l",
+    "OpticalAxisZ-0": "optaxis_z_l",
+    "OpticalAxisX-1": "optaxis_x_r",
+    "OpticalAxisY-1": "optaxis_y_r",
+    "OpticalAxisZ-1": "optaxis_z_r",
+    # ---- Eyelid geometry (MNE channel type: misc) -----------------------
+    # Suffix: t = top lid, b = bottom lid; l = left eye, r = right eye
+    "EyelidAngleTopLeft": "eyelid_ang_tl",
+    "EyelidAngleBottomLeft": "eyelid_ang_bl",
+    "EyelidApertureLeft": "eyelid_apt_l",
+    "EyelidAngleTopRight": "eyelid_ang_tr",
+    "EyelidAngleBottomRight": "eyelid_ang_br",
+    "EyelidApertureRight": "eyelid_apt_r",
+}
+
+_FIF_MAX_CH_LEN = 15
+
+
+def _shorten_fif_ch_names(
+    labels: list[str], max_len: int = _FIF_MAX_CH_LEN
+) -> list[str]:
+    """Shorten channel names that exceed *max_len* characters.
+
+    Uses :data:`_FIF_CH_ABBREVIATIONS` for known eye-tracker channels and
+    falls back to deterministic truncation-with-deduplication for any other
+    name.  Logs all renames so the mapping remains auditable.
+
+    Parameters
+    ----------
+    labels : list of str
+        Original channel names from the XDF stream descriptor.
+    max_len : int
+        Maximum allowed name length (FIF limit = 15).
+
+    Returns
+    -------
+    list of str
+        Names guaranteed to be ``<= max_len`` characters, unique within the
+        returned list.
+    """
+    seen: set[str] = set()
+    out: list[str] = []
+
+    for name in labels:
+        if len(name) <= max_len:
+            out.append(name)
+            seen.add(name)
+            continue
+
+        # 1. Try the lookup table first
+        short = _FIF_CH_ABBREVIATIONS.get(name)
+
+        # 2. Generic fallback: truncate and disambiguate with a counter
+        if short is None or len(short) > max_len:
+            short = name[:max_len]
+
+        # Disambiguate if the shortened name already appeared
+        if short in seen:
+            suffix_len = 3
+            base = short[: max_len - suffix_len]
+            for i in range(1, 1000):
+                candidate = f"{base}{i:0{suffix_len - 1}d}"
+                if candidate not in seen:
+                    short = candidate
+                    break
+
+        logger.info(
+            "XDF channel name %r (%d chars) shortened to %r for FIF compatibility.",
+            name,
+            len(name),
+            short,
+        )
+        out.append(short)
+        seen.add(short)
+
+    return out
 
 
 def _crop_stream(
@@ -246,7 +349,9 @@ class XDFLoader:
         keep_channels: list[str] | None = None,
         drop_channels: list[str] | None = None,
         target_sfreq: float | None = None,
-        alignment_method: Literal["linear", "pchip", "sinc", "nearest", "stim"] = "pchip",
+        alignment_method: Literal[
+            "linear", "pchip", "sinc", "nearest", "stim"
+        ] = "pchip",
         max_nan_gap_s: float | None = None,
         on_mismatch: Literal["crop", "pad"] = "crop",
     ):

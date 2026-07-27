@@ -79,6 +79,7 @@ preprocessor = EEGPreprocessor(
     downsample_ica=None,  # sfreq is 160 Hz; cannot upsample to default 250 Hz
     rng_seed=seed,
     event_id=event_id,  # recorded in provenance metadata
+    # ica_method="amica"  # default; use "picard" to fall back to MNE's picard
 )
 
 t_start = time.perf_counter()

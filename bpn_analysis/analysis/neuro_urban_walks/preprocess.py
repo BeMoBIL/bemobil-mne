@@ -89,9 +89,8 @@ def main():
         rec: MultimodalRecording = LOADER.load(fname_in)
 
         # -- Preprocess Tier-1 (EEG + ECG + gaze) -------------------------
-        fname_out = (
-            DERIV_DIR / fname_in.relative_to(DATA_DIR).with_suffix("") / fname_in.stem
-        )
+        fname_out = DERIV_DIR / fname_in.relative_to(DATA_DIR).with_suffix("")
+        fname_out.mkdir(parents=True, exist_ok=True)
 
         PREPROCESSOR.run_raw(rec.raw, fname_out=fname_out, overwrite=True)
 
@@ -115,6 +114,9 @@ def main():
             print(f"  Events '{ev_label}': {len(ev_ts)} events")
 
         print(f"  session_t0 = {rec.session_t0:.3f} s (LSL)")
+
+        # save everything
+        rec.raw.save(fname_out.with_suffix(".raw.fif.gz"), overwrite=True)
 
 
 # %% Entry point

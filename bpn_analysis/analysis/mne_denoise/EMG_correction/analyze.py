@@ -1536,7 +1536,7 @@ def _load_neck_ref_for_group(minimal_fif):
     if not pca_jsons:
         return None
     with open(pca_jsons[0]) as f:
-        pca_info = json.load(f)
+        pca_info = json.load(f)  # noqa
     # we can't easily reconstruct neck_ref without the raw neck data here;
     # use the burst events stored implicitly in the ERP epochs.
     # For group-level ERP, return None to skip (burst events aren't persisted).
