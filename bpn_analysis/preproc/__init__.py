@@ -12,7 +12,7 @@ from bpn_analysis.preproc.preprocessing import (
     get_bad_chs,
 )
 from bpn_analysis.preproc.utils import (
-    FRONTAL_CHS_EQUIDISTANT,
+    SUBSET_CHANNELS,
     StepTimer,
     _annotate_break_iter,
     _handle_trans,
@@ -67,7 +67,7 @@ __all__ = [
     "build_sys_info",
     "_annotate_break_iter",
     "_handle_trans",
-    "FRONTAL_CHS_EQUIDISTANT",
+    "SUBSET_CHANNELS",
     # Epoching
     "get_stimulus_rename_map",
 ]
