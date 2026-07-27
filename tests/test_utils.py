@@ -42,6 +42,7 @@ from bpn_analysis.preproc.utils import (
     ],
 )
 def test_format_duration(seconds, expected):
+    """Convert seconds to human-readable string."""
     assert format_duration(seconds) == expected
 
 
@@ -49,6 +50,7 @@ def test_format_duration(seconds, expected):
 
 
 def test_step_timer_records_and_totals():
+    """Record steps and compute total duration."""
     timer = StepTimer()
     timer.log_step("filter", 2.0)
     timer.log_step("ica", 8.0)
@@ -59,6 +61,7 @@ def test_step_timer_records_and_totals():
 
 
 def test_step_timer_logs_each_step(caplog):
+    """Log each step name and duration."""
     with caplog.at_level(logging.INFO):
         timer = StepTimer()
         timer.log_step("zapline", 12.0)
@@ -68,6 +71,7 @@ def test_step_timer_logs_each_step(caplog):
 
 
 def test_step_timer_format_summary():
+    """Include step names, TOTAL, and percentages in summary."""
     timer = StepTimer()
     timer.log_step("filter", 30.0)
     timer.log_step("ica", 90.0)
@@ -81,6 +85,7 @@ def test_step_timer_format_summary():
 
 
 def test_step_timer_empty_total():
+    """Return zero total when no steps logged."""
     timer = StepTimer()
     assert timer.total_s == 0.0
 
@@ -89,6 +94,7 @@ def test_step_timer_empty_total():
 
 
 def test_init_descriptor_structure():
+    """Return dict with required top-level keys."""
     desc = init_descriptor(source="sub-01.xdf", pipeline="bpn")
     assert set(desc.keys()) >= {"pipeline", "input", "timestamp", "versions", "steps"}
     assert desc["pipeline"] == "bpn"
@@ -97,6 +103,7 @@ def test_init_descriptor_structure():
 
 
 def test_init_descriptor_list_source():
+    """Serialise list of Path sources as strings."""
     from pathlib import Path
 
     desc = init_descriptor(source=[Path("a.xdf"), Path("b.xdf")])
@@ -104,11 +111,13 @@ def test_init_descriptor_list_source():
 
 
 def test_init_descriptor_none_source():
+    """Store None when no source provided."""
     desc = init_descriptor()
     assert desc["input"] is None
 
 
 def test_set_get_descriptor_roundtrip(tiny_raw):
+    """Round-trip a descriptor through Raw.info."""
     desc = init_descriptor(source="test.xdf", pipeline="test")
     set_descriptor(tiny_raw, desc)
     recovered = get_descriptor(tiny_raw)
@@ -118,17 +127,20 @@ def test_set_get_descriptor_roundtrip(tiny_raw):
 
 
 def test_get_descriptor_missing_returns_none(tiny_raw):
+    """Return None when no description stored."""
     # Raw has no description set by default
     result = get_descriptor(tiny_raw)
     assert result is None
 
 
 def test_get_descriptor_invalid_json(tiny_raw):
+    """Return None when description is invalid JSON."""
     tiny_raw.info["description"] = "not-json{{{{"
     assert get_descriptor(tiny_raw) is None
 
 
 def test_append_desc_creates_descriptor_if_missing(tiny_raw):
+    """Initialise descriptor and record step when missing."""
     append_desc(tiny_raw, "filter", l_freq=1.0, h_freq=100.0)
     desc = get_descriptor(tiny_raw)
     assert desc is not None
@@ -138,6 +150,7 @@ def test_append_desc_creates_descriptor_if_missing(tiny_raw):
 
 
 def test_append_desc_accumulates_steps(tiny_raw):
+    """Append successive steps to existing descriptor."""
     append_desc(tiny_raw, "filter")
     append_desc(tiny_raw, "ica", method="picard")
     desc = get_descriptor(tiny_raw)
@@ -149,7 +162,9 @@ def test_append_desc_accumulates_steps(tiny_raw):
 
 
 def test_sig_params_filters_correctly():
+    """Return only kwargs accepted by the signature."""
     def fn(a, b, c=3):
+        """Accept positional and keyword arguments."""
         pass
 
     result = sig_params(fn, a=1, b=2, d=99)
@@ -158,8 +173,9 @@ def test_sig_params_filters_correctly():
 
 
 def test_sig_params_passes_all_when_var_kwargs():
-    """Functions with **kwargs accept any key - all should pass through."""
+    """Pass all kwargs through var-kwargs functions."""
     def fn(**kwargs):
+        """Accept any keyword arguments."""
         pass
 
     result = sig_params(fn, x=1, y=2)
@@ -170,6 +186,7 @@ def test_sig_params_passes_all_when_var_kwargs():
 
 
 def test_get_raw_subset_returns_requested(tiny_raw):
+    """Return Raw with exactly the requested channels."""
     present = tiny_raw.ch_names[:3]
     sub = get_raw_subset(tiny_raw, subset_chs=present)
     assert sub is not None
@@ -177,6 +194,7 @@ def test_get_raw_subset_returns_requested(tiny_raw):
 
 
 def test_get_raw_subset_skips_missing(tiny_raw):
+    """Silently drop channel names not in Raw."""
     chs = [tiny_raw.ch_names[0], "NONEXISTENT_CH"]
     sub = get_raw_subset(tiny_raw, subset_chs=chs)
     assert sub is not None
@@ -184,6 +202,7 @@ def test_get_raw_subset_skips_missing(tiny_raw):
 
 
 def test_get_raw_subset_returns_none_when_none_present(tiny_raw):
+    """Return None when no requested channels exist."""
     sub = get_raw_subset(tiny_raw, subset_chs=["GHOST1", "GHOST2"])
     assert sub is None
 
@@ -193,7 +212,7 @@ def test_get_raw_subset_returns_none_when_none_present(tiny_raw):
 
 @pytest.fixture
 def eeg_with_line_noise(rng):
-    """500 Hz, 8-ch EEG with 50 Hz sinusoidal line noise injected."""
+    """Create 8-ch EEG with 50 Hz line noise."""
     sfreq = 500.0
     n_times = int(sfreq * 20)
     t = np.arange(n_times) / sfreq
@@ -205,11 +224,13 @@ def eeg_with_line_noise(rng):
 
 
 def test_compute_zapline_dss_line_runs(eeg_with_line_noise):
+    """Run dss_line zapline without error, preserve shape."""
     raw_clean = compute_zapline(eeg_with_line_noise, noise_freqs=50.0, method="dss_line")
     assert raw_clean.get_data().shape == eeg_with_line_noise.get_data().shape
 
 
 def test_compute_zapline_dss_line_iter_runs(eeg_with_line_noise):
+    """Run dss_line_iter zapline without error, preserve shape."""
     raw_clean = compute_zapline(
         eeg_with_line_noise, noise_freqs=50.0, method="dss_line_iter"
     )
@@ -233,6 +254,7 @@ def test_compute_zapline_dss_line_reduces_noise(eeg_with_line_noise):
 
 
 def test_compute_zapline_europe_preset(eeg_with_line_noise):
+    """Verify compute_zapline accepts the europe noise_freqs preset."""
     raw_clean = compute_zapline(
         eeg_with_line_noise, noise_freqs="europe", method="dss_line"
     )
@@ -240,6 +262,7 @@ def test_compute_zapline_europe_preset(eeg_with_line_noise):
 
 
 def test_compute_zapline_usa_preset(eeg_with_line_noise):
+    """Verify compute_zapline accepts the usa noise_freqs preset."""
     # usa has 60 Hz - above half of 500 Hz sfreq is fine, below Nyquist
     raw_clean = compute_zapline(
         eeg_with_line_noise, noise_freqs="usa", method="dss_line"
@@ -248,17 +271,19 @@ def test_compute_zapline_usa_preset(eeg_with_line_noise):
 
 
 def test_compute_zapline_unknown_preset_raises(eeg_with_line_noise):
+    """Raise ValueError for unrecognised noise_freqs preset."""
     with pytest.raises(ValueError, match="Unknown noise_freqs preset"):
         compute_zapline(eeg_with_line_noise, noise_freqs="asia")
 
 
 def test_compute_zapline_unknown_method_raises(eeg_with_line_noise):
+    """Raise ValueError for unrecognised zapline method."""
     with pytest.raises(ValueError, match="Unknown zapline method"):
         compute_zapline(eeg_with_line_noise, noise_freqs=50.0, method="bogus_method")
 
 
 def test_compute_zapline_above_nyquist_skipped(eeg_with_line_noise):
-    """Frequencies above Nyquist are silently skipped; raw is returned unchanged."""
+    """Skip frequencies above Nyquist, return raw unchanged."""
     sfreq = eeg_with_line_noise.info["sfreq"]
     raw_clean = compute_zapline(
         eeg_with_line_noise, noise_freqs=sfreq, method="dss_line"
@@ -269,6 +294,7 @@ def test_compute_zapline_above_nyquist_skipped(eeg_with_line_noise):
 
 
 def test_compute_zapline_none_freq_raises_for_dss(eeg_with_line_noise):
+    """Raise ValueError when noise_freqs is None."""
     with pytest.raises(ValueError, match="noise_freqs cannot be None"):
         compute_zapline(eeg_with_line_noise, noise_freqs=None, method="dss_line")
 
@@ -277,16 +303,13 @@ def test_compute_zapline_none_freq_raises_for_dss(eeg_with_line_noise):
 
 
 def test_detect_bad_by_line_noise_returns_list(eeg_with_line_noise):
+    """Verify detect_bad_by_line_noise returns a list."""
     bads = detect_bad_by_line_noise(eeg_with_line_noise, noise_freqs=[50.0])
     assert isinstance(bads, list)
 
 
 def test_detect_bad_by_line_noise_detects_noisy_channel():
-    """Channel with 1000x stronger 50 Hz noise should be flagged.
-
-    Uses 32 channels so the z-score of the one noisy channel clears z=3.
-    (With only 8 channels, the outlier z-score tops out at ~2.6.)
-    """
+    """Flag channel with 1000x stronger 50 Hz noise."""
     rng = np.random.default_rng(0)
     sfreq = 500.0
     n_ch = 32
@@ -304,6 +327,7 @@ def test_detect_bad_by_line_noise_detects_noisy_channel():
 
 
 def test_detect_bad_by_line_noise_empty_when_no_eeg(rng):
+    """Return empty list when no EEG channels present."""
     info = mne.create_info(["A", "B"], sfreq=250.0, ch_types="misc")
     data = rng.standard_normal((2, 500)) * 1e-6
     raw = mne.io.RawArray(data, info, verbose=False)
@@ -315,18 +339,19 @@ def test_detect_bad_by_line_noise_empty_when_no_eeg(rng):
 
 
 def test_compute_mi_reduction_returns_expected_keys(tiny_raw):
+    """Return dict with all four expected keys."""
     result = compute_mi_reduction(tiny_raw, tiny_raw)
     assert set(result.keys()) == {"mi_before", "mi_after", "mi_reduction", "mi_reduction_pct"}
 
 
 def test_compute_mi_reduction_identical_raws(tiny_raw):
-    """Before == after -> reduction should be ~0."""
+    """Before equals after, reduction should be zero."""
     result = compute_mi_reduction(tiny_raw, tiny_raw)
     assert result["mi_reduction"] == pytest.approx(0.0, abs=1e-9)
 
 
 def test_compute_mi_reduction_after_less_than_before(rng):
-    """Removing shared variance (correlated noise) should reduce MI."""
+    """Removing shared variance should reduce MI."""
     sfreq = 250.0
     n_times = int(sfreq * 10)
     n_ch = 16
@@ -350,12 +375,13 @@ def test_compute_mi_reduction_after_less_than_before(rng):
 
 
 def test_compute_asr_preserves_shape(tiny_raw):
+    """Preserve Raw data shape after ASR."""
     raw_asr = compute_asr(tiny_raw)
     assert raw_asr.get_data().shape == tiny_raw.get_data().shape
 
 
 def test_compute_asr_eeg_channels_modified(rng):
-    """ASR must only modify EEG channels; misc channels stay untouched."""
+    """Modify only EEG channels, leave misc unchanged."""
     sfreq = 250.0
     n_times = int(sfreq * 10)
     ch_names = [f"EEG{i:03d}" for i in range(8)] + ["Misc0", "Misc1"]
@@ -377,12 +403,14 @@ def test_compute_asr_eeg_channels_modified(rng):
 
 
 def test_build_sys_info_contains_key_packages():
+    """Include MNE and installed-packages section in output."""
     info_str = build_sys_info()
     assert "mne" in info_str.lower()
     assert "Installed packages" in info_str
 
 
 def test_build_sys_info_includes_source_data(tmp_path):
+    """Include source data file paths in output."""
     f = tmp_path / "sub-01.xdf"
     f.touch()
     info_str = build_sys_info(source_data=[f])

@@ -428,41 +428,22 @@ class EEGPreprocessor:
 
         Returns
         -------
-        raw_minimal : mne.io.Raw
-            Bandpass-filtered recording with average-reference projection.
         raw_clean : mne.io.Raw
             ASR + ICA cleaned recording with bad channels interpolated.
-        raw_asr : mne.io.Raw
-            ASR-only cleaned copy of ``raw_minimal`` (equals ``raw_minimal``
-            when ``asr_cutoff=False``).
-        raw_subset : mne.io.Raw | None
-            Minimally processed recording restricted to ``subset_chs``,
-            without average reference.  ``None`` if no subset channels found.
-        ica : mne.preprocessing.ICA
-            Fitted ICA object with ``exclude`` set.  Unfitted object when
-            ``fit_ica=False``.
-        ic_labels : dict
-            ICLabel classification results (empty dict when ``fit_ica=False``).
-        dipoles : list of mne.Dipole
-            One dipole per ICA component (empty list when
-            ``fit_dipoles=False``).
-        residuals : list of mne.Evoked
-            Residual field per component (empty list when
-            ``fit_dipoles=False``).
-        trans : mne.transforms.Transform | None
-            Head→MRI transform used for dipole fitting.  ``None`` when
-            ``fit_dipoles=False``.
-        bad_ch_dict : dict
-            Bad channel detection results from PyPREP / FASTER.
+        report : mne.Report | None
+            Quality report (populated when ``make_report=True``, else ``None``).
+        metadata : dict
+            All other pipeline outputs keyed by name:
+            ``raw_minimal``, ``raw_asr``, ``raw_subset``, ``ica``,
+            ``ic_labels``, ``dipoles``, ``residuals``, ``trans``,
+            ``bad_ch_dict``.
         """
         old_verbose = mne.set_log_level(verbose=self.verbose, return_old_level=True)
         timer = StepTimer()
 
         # --- Skip-if-exists caching ---
         if self.skip_if_exists and not overwrite and fname_out is not None:
-            _stem = Path(fname_out).with_suffix("")
-            _clean_path = _stem.parent / (_stem.name + "_clean.fif.gz")
-            if _clean_path.exists():
+            if Path(fname_out).exists():
                 import logging as _log
 
                 _log.getLogger(__name__).info(
@@ -564,11 +545,22 @@ class EEGPreprocessor:
             name="highpass",
             **sig_params(mne.io.Raw.filter, l_freq=self.filter_bands[0], h_freq=None),
         )
-        raw_minimal.filter(l_freq=None, h_freq=self.filter_bands[1])
+        _h_freq = self.filter_bands[1]
+        if _h_freq is not None:
+            _nyquist = raw_minimal.info["sfreq"] / 2
+            if _h_freq >= _nyquist:
+                _h_freq = _nyquist * 0.99
+                warnings.warn(
+                    "filter_bands h_freq clipped to "
+                    f"{_h_freq:.2f} Hz (Nyquist = {_nyquist:.1f} Hz)",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
+        raw_minimal.filter(l_freq=None, h_freq=_h_freq)
         append_desc(
             raw_minimal,
             name="lowpass",
-            **sig_params(mne.io.Raw.filter, l_freq=None, h_freq=self.filter_bands[1]),
+            **sig_params(mne.io.Raw.filter, l_freq=None, h_freq=_h_freq),
         )
         raw_minimal.set_eeg_reference(ref_channels="average", projection=True)
         append_desc(raw_minimal, name="avg_ref_projection")
@@ -700,6 +692,26 @@ class EEGPreprocessor:
 
         timer.log_step("rereference_interpolate", time.perf_counter() - t0)
 
+        # --- Report (optional) ---
+        report = None
+        if self.make_report:
+            from bpn_analysis.preproc.make_report import make_report as _make_report
+
+            report = _make_report(
+                raw_minimal=raw_minimal,
+                raw_clean=raw_clean,
+                ica=ica,
+                ic_labels=ic_labels,
+                dipoles=dipoles,
+                residuals=residuals,
+                trans=trans_out,
+                bad_ch_dict=bad_ch_dict,
+                fname_out=fname_out,
+                event_id=self.event_id,
+                thresh=self.thresh,
+                step_timings=timer.timings,
+            )
+
         # --- Save (optional) ---
         if fname_out is not None:
             t0 = time.perf_counter()
@@ -715,6 +727,7 @@ class EEGPreprocessor:
                 residuals=residuals,
                 trans=trans_out,
                 bad_ch_dict=bad_ch_dict,
+                report=report,
                 overwrite=overwrite,
             )
             timer.log_step("save", time.perf_counter() - t0)
@@ -725,18 +738,18 @@ class EEGPreprocessor:
 
         mne.set_log_level(verbose=old_verbose)
 
-        return (
-            raw_minimal,
-            raw_clean,
-            raw_asr,
-            raw_subset,
-            ica,
-            ic_labels,
-            dipoles,
-            residuals,
-            trans_out,
-            bad_ch_dict,
-        )
+        metadata = {
+            "raw_minimal": raw_minimal,
+            "raw_asr": raw_asr,
+            "raw_subset": raw_subset,
+            "ica": ica,
+            "ic_labels": ic_labels,
+            "dipoles": dipoles,
+            "residuals": residuals,
+            "trans": trans_out,
+            "bad_ch_dict": bad_ch_dict,
+        }
+        return (raw_clean, report, metadata)
 
     # ------------------------------------------------------------------
     # Private helpers
@@ -755,47 +768,47 @@ class EEGPreprocessor:
         residuals,
         trans,
         bad_ch_dict,
+        report,
         overwrite,
     ):
         """Save all pipeline derivatives to disk."""
-        fname_out = Path(fname_out).with_suffix("")
+        fname_out = Path(fname_out)
+        stem = fname_out.with_suffix("")
         fname_out.parent.mkdir(parents=True, exist_ok=True)
 
+        # raw_clean is saved to fname_out directly (primary output / skip sentinel)
+        raw_clean.save(fname_out, overwrite=overwrite, verbose="error")
+
         raw_minimal.save(
-            fname_out.with_name(fname_out.name + "_minimal.fif.gz"),
-            overwrite=overwrite,
-            verbose="error",
-        )
-        raw_clean.save(
-            fname_out.with_name(fname_out.name + "_clean.fif.gz"),
+            stem.with_name(stem.name + "_minimal.fif.gz"),
             overwrite=overwrite,
             verbose="error",
         )
         if self.asr_cutoff is not False:
             raw_asr.save(
-                fname_out.with_name(fname_out.name + "_asr.fif.gz"),
+                stem.with_name(stem.name + "_asr.fif.gz"),
                 overwrite=overwrite,
                 verbose="error",
             )
         if raw_subset is not None:
             raw_subset.save(
-                fname_out.with_name(fname_out.name + "_minimal-subset.fif.gz"),
+                stem.with_name(stem.name + "_minimal-subset.fif.gz"),
                 overwrite=overwrite,
                 verbose="error",
             )
         if self.fit_ica and ica.current_fit != "unfitted":
             ica.save(
-                fname_out.with_name(fname_out.name + "_ica.fif.gz"),
+                stem.with_name(stem.name + "_ica.fif.gz"),
                 overwrite=overwrite,
             )
-            with open(fname_out.with_name(fname_out.name + "_iclabels.json"), "w") as f:
+            with open(stem.with_name(stem.name + "_iclabels.json"), "w") as f:
                 json.dump(ic_labels, f, indent=4, cls=NumpyEncoder)
 
-        with open(fname_out.with_name(fname_out.name + "_bad_channels.json"), "w") as f:
+        with open(stem.with_name(stem.name + "_bad_channels.json"), "w") as f:
             json.dump(bad_ch_dict, f, indent=4, cls=NumpyEncoder)
 
         if dipoles:
-            dipdir = fname_out.parent / f"{fname_out.name}_dipoles"
+            dipdir = stem.parent / f"{stem.name}_dipoles"
             dipdir.mkdir(parents=True, exist_ok=True)
             for i, dip in enumerate(dipoles):
                 if dip is None:
@@ -812,80 +825,67 @@ class EEGPreprocessor:
 
         if dipoles and trans is not None:
             trans.save(
-                fname_out.with_name(fname_out.name + "_trans.fif"),
+                stem.with_name(stem.name + "_trans.fif"),
                 overwrite=overwrite,
                 verbose="error",
             )
 
-        if self.make_report:
-            from bpn_analysis.preproc.make_report import make_report as _make_report
-
-            report = _make_report(
-                raw_minimal=raw_minimal,
-                raw_clean=raw_clean,
-                ica=ica,
-                ic_labels=ic_labels,
-                dipoles=dipoles,
-                residuals=residuals,
-                trans=trans,
-                bad_ch_dict=bad_ch_dict,
-                fname_out=fname_out,
-                event_id=self.event_id,
-                thresh=self.thresh,
-            )
-            report_path = fname_out.with_name(fname_out.name + "_report.html")
+        if report is not None:
+            report_path = stem.with_name(stem.name + "_report.html")
             report.save(str(report_path), overwrite=overwrite, open_browser=False)
 
     def _load_cached_outputs(self, fname_out):
-        """Load previously saved pipeline outputs from *fname_out*.
+        """Load previously saved pipeline outputs and return the run_raw 3-tuple.
 
         Used by the ``skip_if_exists`` fast-path in :meth:`run_raw`.
-        Returns the same 10-tuple as :meth:`run_raw`; missing files yield
-        ``None`` / empty collections.
+        Missing auxiliary files yield ``None`` / empty collections.
         """
-        fname_out = Path(fname_out).with_suffix("")
+        fname_out = Path(fname_out)
+        stem = fname_out.with_suffix("")
 
-        raw_minimal = mne.io.read_raw(
-            fname_out.with_name(fname_out.name + "_minimal.fif.gz"), verbose="error"
-        )
-        raw_clean = mne.io.read_raw(
-            fname_out.with_name(fname_out.name + "_clean.fif.gz"), verbose="error"
+        raw_clean = mne.io.read_raw(fname_out, verbose="error")
+
+        _minimal_path = stem.with_name(stem.name + "_minimal.fif.gz")
+        raw_minimal = (
+            mne.io.read_raw(_minimal_path, verbose="error")
+            if _minimal_path.exists()
+            else raw_clean
         )
 
-        _asr_path = fname_out.with_name(fname_out.name + "_asr.fif.gz")
+        _asr_path = stem.with_name(stem.name + "_asr.fif.gz")
         raw_asr = (
             mne.io.read_raw(_asr_path, verbose="error")
             if _asr_path.exists()
             else raw_minimal
         )
 
-        _subset_path = fname_out.with_name(fname_out.name + "_minimal-subset.fif.gz")
+        _subset_path = stem.with_name(stem.name + "_minimal-subset.fif.gz")
         raw_subset = (
             mne.io.read_raw(_subset_path, verbose="error")
             if _subset_path.exists()
             else None
         )
 
-        _ica_path = fname_out.with_name(fname_out.name + "_ica.fif.gz")
+        _ica_path = stem.with_name(stem.name + "_ica.fif.gz")
         ica = (
             mne.preprocessing.read_ica(_ica_path, verbose="error")
             if _ica_path.exists()
             else mne.preprocessing.ICA(method="picard")
         )
 
-        _labels_path = fname_out.with_name(fname_out.name + "_iclabels.json")
+        _labels_path = stem.with_name(stem.name + "_iclabels.json")
         ic_labels: dict = {}
         if _labels_path.exists():
             with open(_labels_path) as f:
                 ic_labels = json.load(f)
 
-        _bad_path = fname_out.with_name(fname_out.name + "_bad_channels.json")
+        _bad_path = stem.with_name(stem.name + "_bad_channels.json")
         bad_ch_dict: dict = {}
         if _bad_path.exists():
             with open(_bad_path) as f:
                 bad_ch_dict = json.load(f)
 
-        _dipdir = fname_out.parent / f"{fname_out.name}_dipoles"
+        _dipdir = stem.parent / f"{stem.name}_dipoles"
         dipoles: list = []
         residuals: list = []
         if _dipdir.exists():
@@ -894,22 +894,22 @@ class EEGPreprocessor:
             for res_path in sorted(_dipdir.glob("ic-*-residual.fif.gz")):
                 residuals.append(mne.read_evokeds(res_path, verbose="error")[0])
 
-        _trans_path = fname_out.with_name(fname_out.name + "_trans.fif")
+        _trans_path = stem.with_name(stem.name + "_trans.fif")
         trans = (
             mne.transforms.read_trans(_trans_path, verbose="error")
             if _trans_path.exists()
             else None
         )
 
-        return (
-            raw_minimal,
-            raw_clean,
-            raw_asr,
-            raw_subset,
-            ica,
-            ic_labels,
-            dipoles,
-            residuals,
-            trans,
-            bad_ch_dict,
-        )
+        metadata = {
+            "raw_minimal": raw_minimal,
+            "raw_asr": raw_asr,
+            "raw_subset": raw_subset,
+            "ica": ica,
+            "ic_labels": ic_labels,
+            "dipoles": dipoles,
+            "residuals": residuals,
+            "trans": trans,
+            "bad_ch_dict": bad_ch_dict,
+        }
+        return (raw_clean, None, metadata)

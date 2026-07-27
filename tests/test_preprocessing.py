@@ -2,8 +2,6 @@
 
 # %% Imports
 
-from pathlib import Path
-
 import mne
 import numpy as np
 import pytest
@@ -14,7 +12,7 @@ from bpn_analysis.preproc.preprocessing import EEGPreprocessor, get_bad_chs
 
 
 def _eeg_raw(n_ch=32, sfreq=500.0, duration=30.0, rng_seed=0, with_montage=True):
-    """Minimal EEG Raw with optional standard_1020 montage."""
+    """Create a minimal EEG Raw."""
     rng = np.random.default_rng(rng_seed)
     montage = mne.channels.make_standard_montage("standard_1020")
     if with_montage:
@@ -34,6 +32,7 @@ def _eeg_raw(n_ch=32, sfreq=500.0, duration=30.0, rng_seed=0, with_montage=True)
 
 
 def test_get_bad_chs_returns_expected_keys():
+    """Check all required keys are present."""
     raw = _eeg_raw()
     bad_ch_dict = get_bad_chs(raw, notch_lines=None)
     required = {"all_bads", "pyprep", "faster", "bad_by_line_noise", "bad_by_manual"}
@@ -41,13 +40,14 @@ def test_get_bad_chs_returns_expected_keys():
 
 
 def test_get_bad_chs_all_bads_is_list():
+    """Verify all_bads is a list."""
     raw = _eeg_raw()
     bad_ch_dict = get_bad_chs(raw, notch_lines=None)
     assert isinstance(bad_ch_dict["all_bads"], list)
 
 
 def test_get_bad_chs_clean_raw_has_few_bads():
-    """Synthetic Gaussian noise should produce few or no bad channels."""
+    """Run get_bad_chs on Gaussian noise."""
     raw = _eeg_raw(rng_seed=99)
     bad_ch_dict = get_bad_chs(raw, notch_lines=None)
     # Relaxed: just assert we can run it without error
@@ -55,42 +55,43 @@ def test_get_bad_chs_clean_raw_has_few_bads():
 
 
 def test_get_bad_chs_europe_preset():
+    """Accept the 'europe' notch preset without error."""
     raw = _eeg_raw()
     bad_ch_dict = get_bad_chs(raw, notch_lines="europe")
     assert "all_bads" in bad_ch_dict
 
 
 def test_get_bad_chs_usa_preset():
+    """Accept the 'usa' notch preset without error."""
     raw = _eeg_raw()
     bad_ch_dict = get_bad_chs(raw, notch_lines="usa")
     assert "all_bads" in bad_ch_dict
 
 
 def test_get_bad_chs_invalid_preset_raises():
+    """Raise ValueError for unknown notch_lines preset."""
     raw = _eeg_raw()
     with pytest.raises(ValueError, match="Unknown notch_lines preset"):
         get_bad_chs(raw, notch_lines="asia")
 
 
 def test_get_bad_chs_skips_notch_when_none():
-    """Passing notch_lines=None should not raise and should still return a dict."""
+    """Skip notch filtering when notch_lines is None."""
     raw = _eeg_raw()
     bad_ch_dict = get_bad_chs(raw, notch_lines=None)
     assert "all_bads" in bad_ch_dict
 
 
 def test_get_bad_chs_detects_flat_channel(rng=None):
-    """A completely flat channel should be flagged as bad."""
-    rng = np.random.default_rng(7)
+    """Flag a synthetically flat channel as bad."""
     raw = _eeg_raw(n_ch=16, rng_seed=7)
     # Inject a flat (zero) channel at index 5
     raw._data[5] = 0.0
     bad_ch_dict = get_bad_chs(raw, notch_lines=None)
     # The flat channel should appear somewhere in the bad channels
     flat_ch = raw.ch_names[5]
-    all_bads_flat = (
-        bad_ch_dict["all_bads"]
-        + bad_ch_dict["pyprep"].get("bad_by_nan_flat", [])
+    all_bads_flat = bad_ch_dict["all_bads"] + bad_ch_dict["pyprep"].get(
+        "bad_by_nan_flat", []
     )
     assert flat_ch in all_bads_flat or flat_ch in bad_ch_dict["pyprep"].get(
         "bad_by_flat", []
@@ -98,6 +99,7 @@ def test_get_bad_chs_detects_flat_channel(rng=None):
 
 
 def test_get_bad_chs_line_noise_criterion_disabled():
+    """Return empty bad_by_line_noise when line_noise_crit is None."""
     raw = _eeg_raw()
     bad_ch_dict = get_bad_chs(raw, notch_lines=None, line_noise_crit=None)
     assert bad_ch_dict["bad_by_line_noise"] == []
@@ -107,12 +109,13 @@ def test_get_bad_chs_line_noise_criterion_disabled():
 
 
 def test_eegpreprocessor_instantiation():
-    """Constructor should succeed with loader=None (run_raw usage)."""
+    """Instantiate EEGPreprocessor with loader=None."""
     proc = EEGPreprocessor(loader=None)
     assert proc is not None
 
 
 def test_eegpreprocessor_custom_params():
+    """Accept custom filter_bands, zapline_freqs, and zapline_method."""
     proc = EEGPreprocessor(
         loader=None,
         filter_bands=(1.0, 80.0),
@@ -125,19 +128,13 @@ def test_eegpreprocessor_custom_params():
 
 
 def test_eegpreprocessor_skip_if_exists(tmp_path):
-    """When skip_if_exists=True and cached outputs exist, run_raw returns early.
-
-    The code checks for <stem>_clean.fif.gz (not fname_out itself).
-    We create that sentinel and mock _load_cached_outputs so we don't need
-    real fif content.
-    """
+    """Trigger _load_cached_outputs when fname_out exists."""
     from unittest.mock import patch
 
     raw = _eeg_raw(n_ch=16, duration=10.0)
     fname_out = tmp_path / "sub-01_proc-raw.fif"
     # Create the sentinel file that skip_if_exists actually checks
-    clean_path = tmp_path / "sub-01_proc-raw_clean.fif.gz"
-    clean_path.touch()
+    fname_out.touch()
 
     proc = EEGPreprocessor(loader=None, skip_if_exists=True, fit_ica=False)
     with patch.object(proc, "_load_cached_outputs", return_value=None) as mock_load:
@@ -151,7 +148,7 @@ def test_eegpreprocessor_skip_if_exists(tmp_path):
 
 @pytest.mark.slowtest
 def test_eegpreprocessor_full_run_no_dipoles(tmp_path, sample_raw):
-    """Full pipeline without dipole fitting (avoids fsaverage download in CI)."""
+    """Run full pipeline, verify outputs."""
     proc = EEGPreprocessor(
         loader=None,
         filter_bands=(1.0, 40.0),
@@ -172,7 +169,7 @@ def test_eegpreprocessor_full_run_no_dipoles(tmp_path, sample_raw):
 
 @pytest.mark.slowtest
 def test_eegpreprocessor_skip_if_exists_integration(tmp_path, sample_raw):
-    """run_raw with skip_if_exists=True must skip when output already exists."""
+    """Skip reprocessing on second run."""
     proc = EEGPreprocessor(
         loader=None,
         filter_bands=(1.0, 40.0),
@@ -194,7 +191,7 @@ def test_eegpreprocessor_skip_if_exists_integration(tmp_path, sample_raw):
 
 @pytest.mark.slowtest
 def test_eegpreprocessor_rename_channels(tmp_path, sample_raw):
-    """rename_channels dict should be applied before processing."""
+    """Apply rename_channels dict before processing."""
     old_name = sample_raw.ch_names[0]
     new_name = "RENAMED_CH"
 
@@ -211,7 +208,7 @@ def test_eegpreprocessor_rename_channels(tmp_path, sample_raw):
 
 @pytest.mark.slowtest
 def test_eegpreprocessor_provenance_recorded(tmp_path, sample_raw):
-    """Provenance descriptor should be written into raw.info['description']."""
+    """Record a provenance descriptor in raw.info."""
     from bpn_analysis.preproc.utils import get_descriptor
 
     proc = EEGPreprocessor(loader=None, fit_ica=False)

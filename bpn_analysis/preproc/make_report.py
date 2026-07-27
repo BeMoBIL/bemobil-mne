@@ -27,9 +27,6 @@ _REPORT_N_JOBS = int(os.environ.get("BPN_REPORT_N_JOBS", "1"))
 DIPOLE_PLOT_N_JOBS = _REPORT_N_JOBS
 ICA_REPORT_N_JOBS = _REPORT_N_JOBS
 
-# Pandas HTML table kwargs (border-free, no row index)
-_PD_HTML_KWARGS: dict = {"index": False, "border": 0}
-
 # %% Private helpers
 
 
@@ -144,14 +141,11 @@ def _iclabel_proba_histogram(ic_labels: dict, thresh: float) -> plt.Figure:
     max_probas = [float(np.max(row)) for row in probas]
 
     if pd is not None and sns is not None:
-        import pandas as _pd
-        import seaborn as _sns
-
-        df = _pd.DataFrame({"label": labels, "probability": max_probas})
+        df = pd.DataFrame({"label": labels, "probability": max_probas})
         fig, ax = plt.subplots(figsize=(8, 4))
         fig.set_layout_engine("constrained")
-        _sns.histplot(data=df, x="probability", hue="label", ax=ax, bins=20)
-        _sns.rugplot(
+        sns.histplot(data=df, x="probability", hue="label", ax=ax, bins=20)
+        sns.rugplot(
             data=df,
             x="probability",
             hue="label",
@@ -163,7 +157,7 @@ def _iclabel_proba_histogram(ic_labels: dict, thresh: float) -> plt.Figure:
         ax.axvline(thresh, color="k", linestyle="--", label=f"thresh={thresh}")
         ax.legend()
         ax.set_title("ICLabel: max probabilities by label")
-        _sns.despine(fig)
+        sns.despine(fig)
     else:
         fig, ax = plt.subplots(figsize=(8, 4))
         ax.hist(max_probas, bins=20)
@@ -348,44 +342,7 @@ def make_report(
     thresh: float = 0.7,
     step_timings: list[dict] | None = None,
 ) -> mne.Report:
-    """Make an ``mne.Report`` summarising EEGPreprocessor pipeline outputs.
-
-    Parameters
-    ----------
-    raw_minimal : mne.io.BaseRaw
-        Bandpass-filtered recording with average-reference projection
-        (first output of :meth:`EEGPreprocessor.run_raw`).
-    raw_clean : mne.io.BaseRaw
-        Fully cleaned recording (second output of :meth:`EEGPreprocessor.run_raw`).
-    ica : mne.preprocessing.ICA
-        Fitted ICA object with ``exclude`` set.
-    ic_labels : dict
-        ICLabel results: ``{"labels": [...], "y_pred_proba": [...]}``.
-    dipoles : list
-        Dipoles per ICA component (empty list if dipoles were not fitted).
-    residuals : list
-        Residual evokeds per component (empty list if not fitted).
-    trans : mne.transforms.Transform | None
-        Head-to-MRI transform used for dipole fitting.
-    bad_ch_dict : dict
-        Bad channel detection results from :func:`get_bad_chs`.
-    fname_out : str | Path | None
-        Used for the report title.  Pass ``None`` for a generic title.
-    event_id : dict | None
-        Event map for creating epochs and ERPs.  Pass ``None`` to skip.
-    thresh : float
-        ICLabel probability threshold used during preprocessing (shown in
-        report tables for reference).
-    step_timings : list of dict | None
-        Step-timing records from :class:`~bpn_analysis.preproc.utils.StepTimer`
-        (``[{"name": str, "duration_s": float}, ...]``).
-
-    Returns
-    -------
-    report : mne.Report
-        Populated report object.  Call ``report.save(path, overwrite=True)``
-        to write it to disk.
-    """
+    """Build and return an mne.Report for EEGPreprocessor outputs."""
     # Force headless Agg backend - same reason as in standard_scripts
     matplotlib.use("Agg", force=True)
 
