@@ -575,7 +575,19 @@ def compute_ica(
     raw_ica = raw.copy().pick("eeg")
 
     raw_ica.filter(l_freq=filter_bands_ica[0], h_freq=None)
-    raw_ica.filter(l_freq=None, h_freq=filter_bands_ica[1])
+    _h_freq_ica = filter_bands_ica[1]
+    if _h_freq_ica is not None:
+        _nyquist_ica = raw_ica.info["sfreq"] / 2
+        if _h_freq_ica >= _nyquist_ica:
+            import warnings as _w
+            _h_freq_ica = _nyquist_ica * 0.99
+            _w.warn(
+                f"filter_bands_ica h_freq clipped to {_h_freq_ica:.2f} Hz "
+                f"(Nyquist = {_nyquist_ica:.1f} Hz)",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+    raw_ica.filter(l_freq=None, h_freq=_h_freq_ica)
     raw_ica.notch_filter(freqs=notch_freqs, notch_widths=1.0)
 
     if downsample_ica is not None and raw_ica.info["sfreq"] > downsample_ica:

@@ -19,22 +19,26 @@ from bpn_analysis.preproc.motion import (
 
 
 def test_find_rigid_bodies_detects_quat_channels(motion_raw):
+    """Detect rigid bodies from quaternion channels."""
     bodies = find_rigid_bodies(motion_raw)
     assert "head" in bodies
 
 
 def test_find_rigid_bodies_detects_euler_channels(motion_raw):
+    """Detect rigid bodies from Euler angle channels."""
     bodies = find_rigid_bodies(motion_raw)
     assert "hand" in bodies
 
 
 def test_find_rigid_bodies_detects_pos_channels(motion_raw):
+    """Detect all rigid bodies with position channels."""
     # Both head and hand have pos channels
     bodies = find_rigid_bodies(motion_raw)
     assert set(bodies) == {"head", "hand"}
 
 
 def test_find_rigid_bodies_empty_when_no_motion():
+    """Return empty list when no motion channels present."""
     info = mne.create_info(["Cz", "Fz"], sfreq=250.0, ch_types="eeg")
     data = np.zeros((2, 250))
     raw = mne.io.RawArray(data, info, verbose=False)
@@ -42,6 +46,7 @@ def test_find_rigid_bodies_empty_when_no_motion():
 
 
 def test_find_rigid_bodies_sorted(motion_raw):
+    """Return body names in sorted order."""
     bodies = find_rigid_bodies(motion_raw)
     assert bodies == sorted(bodies)
 
@@ -50,6 +55,7 @@ def test_find_rigid_bodies_sorted(motion_raw):
 
 
 def test_process_rigid_body_replaces_quat_with_euler(motion_raw):
+    """Replace quaternion channels with Euler angle channels."""
     raw_out, rb_info = process_rigid_body(motion_raw)
     # Quaternion channels should be gone
     for quat_ch in ("head_quat_x", "head_quat_y", "head_quat_z", "head_quat_w"):
@@ -60,6 +66,7 @@ def test_process_rigid_body_replaces_quat_with_euler(motion_raw):
 
 
 def test_process_rigid_body_adds_velocity_channels(motion_raw):
+    """Add velocity channels when compute_velocity is True."""
     raw_out, _ = process_rigid_body(motion_raw, compute_velocity=True)
     # naming: <rb>_<type>_vel_<axis>  (type preserved to avoid eul/pos collisions)
     assert "head_eul_vel_x" in raw_out.ch_names
@@ -68,6 +75,7 @@ def test_process_rigid_body_adds_velocity_channels(motion_raw):
 
 
 def test_process_rigid_body_adds_acceleration_channels(motion_raw):
+    """Add acceleration channels when compute_acceleration is True."""
     raw_out, _ = process_rigid_body(
         motion_raw, compute_velocity=True, compute_acceleration=True
     )
@@ -77,12 +85,14 @@ def test_process_rigid_body_adds_acceleration_channels(motion_raw):
 
 
 def test_process_rigid_body_no_velocity(motion_raw):
+    """Omit velocity and acceleration when compute_velocity is False."""
     raw_out, _ = process_rigid_body(motion_raw, compute_velocity=False)
     assert all("_vel_" not in ch for ch in raw_out.ch_names)
     assert all("_acc_" not in ch for ch in raw_out.ch_names)
 
 
 def test_process_rigid_body_no_acceleration(motion_raw):
+    """Omit acceleration channels when compute_acceleration is False."""
     raw_out, _ = process_rigid_body(
         motion_raw, compute_velocity=True, compute_acceleration=False
     )
@@ -91,6 +101,7 @@ def test_process_rigid_body_no_acceleration(motion_raw):
 
 
 def test_process_rigid_body_rb_info_keys(motion_raw):
+    """Verify rb_info contains expected keys per body."""
     _, rb_info = process_rigid_body(motion_raw)
     assert set(rb_info.keys()) == {"head", "hand"}
     assert "mode" in rb_info["head"]
@@ -98,11 +109,13 @@ def test_process_rigid_body_rb_info_keys(motion_raw):
 
 
 def test_process_rigid_body_head_mode_quat_to_euler(motion_raw):
+    """Record quat->euler mode for head rigid body."""
     _, rb_info = process_rigid_body(motion_raw)
     assert rb_info["head"]["mode"] == "quat->euler"
 
 
 def test_process_rigid_body_hand_mode_euler(motion_raw):
+    """Record euler mode for hand rigid body."""
     _, rb_info = process_rigid_body(motion_raw)
     assert rb_info["hand"]["mode"] == "euler"
 
@@ -114,6 +127,7 @@ def test_process_rigid_body_subset(motion_raw):
 
 
 def test_process_rigid_body_warns_on_empty(caplog):
+    """Log warning when no rigid body channels found."""
     info = mne.create_info(["Cz"], sfreq=250.0, ch_types="eeg")
     raw = mne.io.RawArray(np.zeros((1, 250)), info, verbose=False)
     import logging
@@ -124,6 +138,7 @@ def test_process_rigid_body_warns_on_empty(caplog):
 
 
 def test_process_rigid_body_preserves_n_times(motion_raw):
+    """Preserve the number of time points."""
     n_times_before = motion_raw.get_data().shape[1]
     raw_out, _ = process_rigid_body(motion_raw)
     assert raw_out.get_data().shape[1] == n_times_before
@@ -133,6 +148,7 @@ def test_process_rigid_body_preserves_n_times(motion_raw):
 
 
 def test_split_by_rigid_body_returns_dict(motion_raw):
+    """Return a dict keyed by rigid body."""
     raw_proc, _ = process_rigid_body(motion_raw)
     split = split_by_rigid_body(raw_proc)
     assert isinstance(split, dict)
@@ -141,6 +157,7 @@ def test_split_by_rigid_body_returns_dict(motion_raw):
 
 
 def test_split_by_rigid_body_channels_are_subset(motion_raw):
+    """Verify each sub-Raw has only its body channels."""
     raw_proc, _ = process_rigid_body(motion_raw)
     split = split_by_rigid_body(raw_proc)
     for rb, sub in split.items():
@@ -149,6 +166,7 @@ def test_split_by_rigid_body_channels_are_subset(motion_raw):
 
 
 def test_split_by_rigid_body_explicit_names(motion_raw):
+    """Restrict output to explicitly requested body names."""
     raw_proc, _ = process_rigid_body(motion_raw)
     split = split_by_rigid_body(raw_proc, rb_names=["head"])
     assert set(split.keys()) == {"head"}
@@ -158,7 +176,7 @@ def test_split_by_rigid_body_explicit_names(motion_raw):
 
 
 def test_quat_to_euler_identity():
-    """Identity quaternion (0, 0, 0, 1) -> (0, 0, 0)."""
+    """Map identity quaternion to zero Euler angles."""
     n = 10
     q = np.zeros((4, n))
     q[3] = 1.0  # qw = 1
@@ -167,7 +185,7 @@ def test_quat_to_euler_identity():
 
 
 def test_quat_to_euler_90_deg_yaw():
-    """90-degree yaw (z-axis rotation): quat = (0, 0, sin45, cos45)."""
+    """Convert 90-degree yaw quaternion to Euler angles."""
     angle = np.pi / 2
     q = np.array([[0.0], [0.0], [np.sin(angle / 2)], [np.cos(angle / 2)]])
     euler = _quat_to_euler_zyx(q)
@@ -177,6 +195,7 @@ def test_quat_to_euler_90_deg_yaw():
 
 
 def test_quat_to_euler_output_shape():
+    """Return array of shape (3, n)."""
     n = 50
     q = np.zeros((4, n))
     q[3] = 1.0
@@ -188,6 +207,7 @@ def test_quat_to_euler_output_shape():
 
 
 def test_lowpass_array_preserves_shape():
+    """Return array with same shape as input."""
     sfreq = 250.0
     data = np.random.default_rng(0).standard_normal((4, int(sfreq * 5)))
     out = _lowpass_array(data, sfreq, cutoff=8.0)
@@ -195,7 +215,7 @@ def test_lowpass_array_preserves_shape():
 
 
 def test_lowpass_array_attenuates_high_freq():
-    """High-frequency content above cutoff should be strongly attenuated."""
+    """Attenuate high-frequency content above cutoff."""
     sfreq = 250.0
     n = int(sfreq * 10)
     t = np.arange(n) / sfreq
@@ -231,10 +251,11 @@ def test_lowpass_array_attenuates_high_freq():
     ],
 )
 def test_src_to_deriv(src, suffix, expected):
+    """Build correct derivative channel name."""
     assert _src_to_deriv(src, suffix) == expected
 
 
 def test_src_to_deriv_fallback():
-    """Channel with no recognised segment type gets suffix appended."""
+    """Append suffix to unrecognised channel names."""
     result = _src_to_deriv("mystreamchannel", "_vel")
     assert result == "mystreamchannel_vel"

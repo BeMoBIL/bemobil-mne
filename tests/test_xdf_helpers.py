@@ -18,13 +18,13 @@ from bpn_analysis.io.xdf import (
 
 
 def test_shorten_passthrough_short_names():
-    """Names at or below 15 chars must pass through unchanged."""
+    """Pass short names through unchanged."""
     names = ["Cz", "EEG001", "pupil_left"]
     assert _shorten_fif_ch_names(names) == names
 
 
 def test_shorten_uses_abbreviation_table():
-    """Known Pupil Labs names > 15 chars must be replaced by their MNE short form."""
+    """Replace known long names with MNE short form."""
     # "EyeballCenterX-0" is 16 chars -> triggers abbreviation lookup
     names = ["EyeballCenterX-0", "EyeballCenterX-1"]
     result = _shorten_fif_ch_names(names)
@@ -32,7 +32,7 @@ def test_shorten_uses_abbreviation_table():
 
 
 def test_shorten_all_known_eye_tracker_channels():
-    """Every entry in _FIF_CH_ABBREVIATIONS that exceeds 15 chars must map correctly."""
+    """Map all long abbreviation entries correctly."""
     long_names = [n for n in _FIF_CH_ABBREVIATIONS if len(n) > _FIF_MAX_CH_LEN]
     assert long_names, "Expected at least some names > 15 chars in the table"
     result = _shorten_fif_ch_names(long_names)
@@ -44,7 +44,7 @@ def test_shorten_all_known_eye_tracker_channels():
 
 
 def test_shorten_fallback_truncates_unknown():
-    """Unknown names longer than 15 chars are truncated to exactly 15."""
+    """Truncate unknown names to exactly 15 chars."""
     name = "ThisIsAVeryLongChannelName"
     result = _shorten_fif_ch_names([name])
     assert len(result[0]) == _FIF_MAX_CH_LEN
@@ -52,7 +52,7 @@ def test_shorten_fallback_truncates_unknown():
 
 
 def test_shorten_deduplicates_on_truncation():
-    """If two names truncate to the same prefix, the second gets a unique suffix."""
+    """Deduplicate names that truncate to same prefix."""
     # Create two names that share the first 15 characters
     base = "A" * _FIF_MAX_CH_LEN
     name1 = base + "X"
@@ -63,12 +63,12 @@ def test_shorten_deduplicates_on_truncation():
 
 
 def test_shorten_output_all_within_limit():
-    """All output names must satisfy the FIF limit regardless of input."""
+    """Keep all output names within FIF limit."""
     mixed = [
         "short",
-        "EyelidAngleTopLeft",        # in table
-        "UnknownVeryLongChannelName", # fallback
-        "AnotherLongNameThatWontFit", # fallback (may collide)
+        "EyelidAngleTopLeft",  # in table
+        "UnknownVeryLongChannelName",  # fallback
+        "AnotherLongNameThatWontFit",  # fallback (may collide)
     ]
     result = _shorten_fif_ch_names(mixed)
     for name in result:
@@ -83,7 +83,7 @@ def test_shorten_output_unique():
 
 
 def test_shorten_logs_rename(caplog):
-    """A rename must be logged at INFO level so it is auditable."""
+    """Log each rename at INFO level."""
     with caplog.at_level(logging.INFO):
         _shorten_fif_ch_names(["EyeballCenterX-0"])  # 16 chars -> triggers rename
     assert "EyeballCenterX-0" in caplog.text
@@ -107,11 +107,12 @@ def test_shorten_logs_rename(caplog):
     ],
 )
 def test_unit_scale_known_units(unit, expected):
+    """Return correct scale factor for known units."""
     assert _unit_scale(unit) == pytest.approx(expected)
 
 
 def test_unit_scale_unknown_unit_warns(caplog):
-    """Unrecognised units emit a warning but return 1.0 (identity scaling)."""
+    """Warn and return 1.0 for unknown units."""
     with caplog.at_level(logging.WARNING):
         scale = _unit_scale("furlong", ch_name="ch0")
     assert scale == pytest.approx(1.0)
@@ -119,6 +120,7 @@ def test_unit_scale_unknown_unit_warns(caplog):
 
 
 def test_unit_scale_case_insensitive():
+    """Verify _unit_scale matches unit strings case-insensitively."""
     assert _unit_scale("MICROVOLT") == pytest.approx(1e-6)
     assert _unit_scale("MicroVolt") == pytest.approx(1e-6)
 
@@ -127,6 +129,7 @@ def test_unit_scale_case_insensitive():
 
 
 def _make_stream(name="EEG", stream_type="EEG", source_id="device01"):
+    """Return a minimal XDF stream dict."""
     return {
         "info": {
             "name": [name],
@@ -140,18 +143,24 @@ def _make_stream(name="EEG", stream_type="EEG", source_id="device01"):
 
 
 def test_match_stream_by_name():
+    """Verify _match_stream finds a stream matching by name."""
     streams = [_make_stream("EEG"), _make_stream("EMG")]
     result = _match_stream(streams, name="EEG")
     assert result["info"]["name"][0] == "EEG"
 
 
 def test_match_stream_by_type():
-    streams = [_make_stream("A", stream_type="EEG"), _make_stream("B", stream_type="EMG")]
+    """Verify _match_stream finds a stream matching by stream_type."""
+    streams = [
+        _make_stream("A", stream_type="EEG"),
+        _make_stream("B", stream_type="EMG"),
+    ]
     result = _match_stream(streams, stream_type="EMG")
     assert result["info"]["name"][0] == "B"
 
 
 def test_match_stream_by_source_id():
+    """Verify _match_stream finds a stream matching by source_id."""
     streams = [
         _make_stream(source_id="device01"),
         _make_stream(source_id="device02"),
@@ -161,12 +170,14 @@ def test_match_stream_by_source_id():
 
 
 def test_match_stream_no_match_returns_none():
+    """Return None when no stream matches."""
     streams = [_make_stream("EEG")]
     result = _match_stream(streams, name="NonExistent")
     assert result is None
 
 
 def test_match_stream_allow_multiple():
+    """Return all matching streams when allow_multiple=True."""
     streams = [_make_stream("EEG", stream_type="EEG")] * 3
     result = _match_stream(streams, stream_type="EEG", allow_multiple=True)
     assert isinstance(result, list)
@@ -174,13 +185,14 @@ def test_match_stream_allow_multiple():
 
 
 def test_match_stream_allow_multiple_no_match_returns_empty_list():
+    """Return empty list when allow_multiple and no match."""
     streams = [_make_stream("EEG")]
     result = _match_stream(streams, name="Ghost", allow_multiple=True)
     assert result == []
 
 
 def test_match_stream_multiple_warns_and_returns_first(caplog):
-    """When allow_multiple=False and multiple streams match, first is returned with a warning."""
+    """Warn and return first when multiple streams match."""
     streams = [_make_stream("EEG")] * 2
     with caplog.at_level(logging.WARNING):
         result = _match_stream(streams, name="EEG")
