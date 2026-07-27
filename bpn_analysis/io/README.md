@@ -11,7 +11,7 @@ returns a `MultimodalRecording` container.
 Some recordings combine streams from multiple independent devices,
 each running at a different sampling rate:
 
-```
+```markdown
 | Stream        | Typical rate     |
 |---------------|------------------|
 | EEG           | 500 - 1000 Hz    |

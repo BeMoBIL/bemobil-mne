@@ -2,8 +2,17 @@
 
 # %% Imports
 
+import datetime
+import inspect
+import io
 import json
 import logging
+import os
+import shutil
+import subprocess
+import sys
+from importlib.metadata import PackageNotFoundError, version
+from pathlib import Path
 
 import mne
 import mne_faster
@@ -12,6 +21,20 @@ import numpy as np
 from meegkit.asr import ASR
 
 LOGGER = logging.getLogger(__name__)
+
+# %% Constants
+
+# Subset of channels to return when calling get_raw_subset() without a specific list
+SUBSET_CHANNELS = [
+    "Cz",
+    "C1",
+    "C2",
+    "F1",
+    "F2",
+    "F3",
+    "F4",
+    "Fz",
+]
 
 # %% Functions
 
@@ -89,7 +112,389 @@ def _annotate_break_iter(raw, annotate_break_kwargs):
             f"After adjustment: {json.dumps(annotate_break_kwargs, indent=4)}"
         )
 
-    return annots_break
+    return annots_break, annotate_break_kwargs
+
+
+# %% Provenance / descriptor helpers
+
+
+def init_descriptor(source=None, pipeline=""):
+    """Initialise a provenance descriptor dict for a processing run.
+
+    Parameters
+    ----------
+    source : str | Path | list | None
+        Input file name(s) or identifier for the source data.
+    pipeline : str
+        Name of the pipeline that initialised this descriptor.
+
+    Returns
+    -------
+    dict
+        Descriptor with keys ``pipeline``, ``input``, ``timestamp``,
+        ``versions``, and an empty ``steps`` list.
+    """
+    try:
+        bpn_ver = version("bpn-analysis")
+    except PackageNotFoundError:
+        bpn_ver = "unknown"
+
+    try:
+        mne_ver = version("mne")
+    except PackageNotFoundError:
+        mne_ver = "unknown"
+
+    if isinstance(source, list):
+        src = [str(s) for s in source]
+    elif source is not None:
+        src = str(source)
+    else:
+        src = None
+
+    return {
+        "pipeline": pipeline,
+        "input": src,
+        "timestamp": datetime.datetime.now().isoformat(),
+        "versions": {"bpn_analysis": bpn_ver, "mne": mne_ver},
+        "steps": [],
+    }
+
+
+def get_descriptor(raw):
+    """Return the provenance descriptor stored in *raw*, or ``None``.
+
+    Parameters
+    ----------
+    raw : mne.io.BaseRaw
+        Raw object whose ``info['description']`` may hold a JSON descriptor.
+
+    Returns
+    -------
+    dict | None
+        Parsed descriptor, or ``None`` if not present / not valid JSON.
+    """
+    desc_str = raw.info.get("description", None)
+    if not desc_str:
+        return None
+    try:
+        return json.loads(desc_str)
+    except (json.JSONDecodeError, TypeError):
+        return None
+
+
+def set_descriptor(raw, descriptor):
+    """Serialise *descriptor* and store it in ``raw.info['description']``.
+
+    Parameters
+    ----------
+    raw : mne.io.BaseRaw
+        Raw object to annotate.
+    descriptor : dict
+        Provenance descriptor as returned by :func:`init_descriptor`.
+    """
+    raw.info["description"] = json.dumps(descriptor)
+
+
+def append_desc(raw, name, **kwargs):
+    """Append a named processing step to the provenance descriptor.
+
+    If no descriptor has been initialised yet, a new one is created
+    automatically (with ``pipeline="unknown"``).
+
+    Parameters
+    ----------
+    raw : mne.io.BaseRaw
+        Raw object whose descriptor to update in place.
+    name : str
+        Name of the processing step.
+    **kwargs
+        Arbitrary key/value metadata to record for this step
+        (e.g. filter frequencies, random seed, version strings).
+    """
+    desc = get_descriptor(raw)
+    if desc is None:
+        desc = init_descriptor(pipeline="unknown")
+    desc["steps"].append({"name": name, **kwargs})
+    set_descriptor(raw, desc)
+
+
+def sig_params(func, **kwargs):
+    """Return only the kwargs that match *func*'s signature.
+
+    Useful for recording exactly which parameters were forwarded to an MNE
+    function in provenance metadata without capturing irrelevant extras.
+
+    Parameters
+    ----------
+    func : callable
+        The function whose signature to filter against.
+    **kwargs
+        All keyword arguments that were (or will be) passed to *func*.
+
+    Returns
+    -------
+    dict
+        Subset of *kwargs* whose keys appear in *func*'s parameter list.
+    """
+    try:
+        sig = inspect.signature(func)
+        return {k: v for k, v in kwargs.items() if k in sig.parameters}
+    except (ValueError, TypeError):
+        return kwargs
+
+
+# %% Timing helpers
+
+
+def format_duration(seconds):
+    """Format a duration in seconds as a compact human-readable string.
+
+    Parameters
+    ----------
+    seconds : float
+        Duration in seconds.
+
+    Returns
+    -------
+    str
+        E.g. ``"42.3s"``, ``"3m 05.0s"``, or ``"1h 12m 30.0s"``.
+    """
+    seconds = float(seconds)
+    if seconds < 60:
+        return f"{seconds:.1f}s"
+    minutes, secs = divmod(seconds, 60)
+    hours, minutes = divmod(int(minutes), 60)
+    if hours:
+        return f"{hours}h {int(minutes):02d}m {secs:04.1f}s"
+    return f"{int(minutes)}m {secs:04.1f}s"
+
+
+class StepTimer:
+    """Record and log wall-clock durations of named pipeline steps.
+
+    Parameters
+    ----------
+    logger : logging.Logger | None
+        Logger used to emit per-step messages.  Defaults to the module logger.
+
+    Attributes
+    ----------
+    timings : list of dict
+        ``{"name": str, "duration_s": float}`` entries in insertion order.
+    """
+
+    def __init__(self, logger=None):
+        self._logger = logger or LOGGER
+        self.timings = []
+
+    def log_step(self, name, duration_s):
+        """Record and log a single step duration.
+
+        Parameters
+        ----------
+        name : str
+            Name of the step.
+        duration_s : float
+            Duration of the step in seconds.
+        """
+        self.timings.append({"name": name, "duration_s": float(duration_s)})
+        self._logger.info(f"Step '{name}' took {format_duration(duration_s)}")
+
+    @property
+    def total_s(self):
+        """float: Total recorded duration across all steps."""
+        return sum(t["duration_s"] for t in self.timings)
+
+    def format_summary(self):
+        """Return a multi-line, human-readable summary of all step timings."""
+        total = self.total_s
+        lines = ["Preprocessing step timings:"]
+        for t in self.timings:
+            share = (t["duration_s"] / total * 100) if total else 0.0
+            lines.append(
+                f"  {t['name']:<24} {format_duration(t['duration_s']):>12}"
+                f"  ({share:4.1f}%)"
+            )
+        lines.append(f"  {'TOTAL':<24} {format_duration(total):>12}")
+        return "\n".join(lines)
+
+
+# %% System info
+
+
+def build_sys_info(source_data=None):
+    """Return a string with full environment and version information.
+
+    Parameters
+    ----------
+    source_data : list of Path | None
+        Optional list of input file paths to include in the report.
+
+    Returns
+    -------
+    str
+        Multi-section plain-text report.
+    """
+    sections = []
+
+    if source_data:
+        lines = ["Source data", "-----------", ""]
+        lines.extend(str(Path(p).resolve()) for p in source_data)
+        sections.append("\n".join(lines))
+
+    pkg_lines = ["Installed packages", "------------------", ""]
+    for pkg in (
+        "bpn-analysis",
+        "mne",
+        "mne-icalabel",
+        "mne-faster",
+        "meegkit",
+        "pyprep",
+    ):
+        try:
+            ver = version(pkg)
+        except PackageNotFoundError:
+            ver = "not installed"
+        pkg_lines.append(f"{pkg:<20} {ver}")
+    sections.append("\n".join(pkg_lines))
+
+    buf = io.StringIO()
+    mne.sys_info(fid=buf)
+    sections.append("MNE SYS_INFO\n" + "-" * 20 + "\n" + buf.getvalue())
+
+    pip_out = subprocess.run(
+        [sys.executable, "-m", "pip", "list", "--editable"],
+        capture_output=True,
+        text=True,
+    ).stdout
+    sections.append("Editable installs\n" + "-" * 17 + "\n\n" + pip_out)
+
+    _env_conda = os.environ.get("CONDA_EXE")
+    conda_exe = shutil.which("conda") or (
+        shutil.which(_env_conda) if _env_conda else None
+    )
+    if conda_exe:
+        conda_result = subprocess.run(
+            [conda_exe, "env", "export"], capture_output=True, text=True
+        )
+        if conda_result.returncode == 0:
+            sections.append("conda export\n" + "-" * 12 + "\n" + conda_result.stdout)
+
+    return "\n\n".join(sections)
+
+
+# %% Channel subset helper
+
+
+def get_raw_subset(raw, subset_chs=None):
+    """Return a copy of *raw* containing only the requested subset of channels.
+
+    Parameters
+    ----------
+    raw : mne.io.BaseRaw
+        Source recording.
+    subset_chs : list of str | None
+        Channel names to keep.  Defaults to :data:`SUBSET_CHANNELS`
+        (frontal channels of the equidistant cap).
+
+    Returns
+    -------
+    mne.io.Raw | None
+        Copy of *raw* with only the available subset channels, or ``None``
+        if none of the requested channels are present.
+    """
+    if subset_chs is None:
+        subset_chs = SUBSET_CHANNELS
+
+    subset_chs = list(subset_chs)
+    present = [ch for ch in subset_chs if ch in raw.ch_names]
+    missing = [ch for ch in subset_chs if ch not in raw.ch_names]
+
+    if not present:
+        LOGGER.warning("No requested subset channels available in raw. Returning None.")
+        return None
+
+    if missing:
+        LOGGER.warning(
+            f"Requested subset channels not in raw: {missing}. "
+            f"Using available subset: {present}"
+        )
+
+    raw_subset = raw.copy().pick(present)
+    LOGGER.info(f"Created subset raw with channels: {raw_subset.ch_names}")
+    return raw_subset
+
+
+# %% Coregistration / transform helpers
+
+
+def auto_coreg_fsaverage(info, subjects_dir, fit_icp_kwargs=None):
+    """Automatically coregister head to fsaverage MRI and return the transform.
+
+    Parameters
+    ----------
+    info : mne.Info
+        Info object from the raw recording (must have digitisation points).
+    subjects_dir : str | Path
+        FreeSurfer subjects directory (parent of the ``fsaverage`` folder).
+    fit_icp_kwargs : dict | None
+        Keyword arguments forwarded to :meth:`mne.coreg.Coregistration.fit_icp`.
+        If ``None``, sensible defaults are used.
+
+    Returns
+    -------
+    trans : mne.transforms.Transform
+        Head-to-MRI transformation.
+    """
+    fiducials = "estimated"
+    subject = "fsaverage"
+    coreg = mne.coreg.Coregistration(info, subject, subjects_dir, fiducials=fiducials)
+    coreg.set_scale_mode("uniform")
+    coreg.fit_fiducials(verbose=True)
+
+    if fit_icp_kwargs is None:
+        fit_icp_kwargs = dict(
+            n_iterations=40,
+            lpa_weight=1.0,
+            nasion_weight=1.0,
+            rpa_weight=1.0,
+            hsp_weight=0,
+            eeg_weight=5.0,
+            hpi_weight=0,
+            verbose=True,
+        )
+    coreg.fit_icp(**fit_icp_kwargs)
+    return coreg.trans
+
+
+def _handle_trans(trans, info=None):
+    """Resolve the head-to-MRI transform for dipole fitting.
+
+    Parameters
+    ----------
+    trans : mne.transforms.Transform | ``"fit"`` | ``"fsaverage"`` | None
+        - ``None`` or ``"fsaverage"``: use the MNE built-in fsaverage transform.
+        - ``"fit"``: run automatic coregistration via
+          :func:`auto_coreg_fsaverage`.
+        - :class:`mne.transforms.Transform`: used directly.
+    info : mne.Info | None
+        Required only when ``trans="fit"``.
+
+    Returns
+    -------
+    mne.transforms.Transform
+    """
+    fs_dir = mne.datasets.fetch_fsaverage(verbose=False)
+    fpath_fsaverage_trans = fs_dir / "bem" / "fsaverage-trans.fif"
+
+    if trans is None or (isinstance(trans, str) and trans == "fsaverage"):
+        return mne.transforms.read_trans(fpath_fsaverage_trans)
+    elif isinstance(trans, str) and trans == "fit":
+        return auto_coreg_fsaverage(info, fs_dir.parent)
+    else:
+        if not isinstance(trans, mne.transforms.Transform):
+            raise TypeError(f"Invalid trans: {trans!r}")
+        return trans
 
 
 def compute_ica(
