@@ -24,6 +24,8 @@ from bpn_analysis.preproc.utils import (
     append_desc,
     compute_asr,
     compute_ica,
+    compute_zapline,
+    detect_bad_by_line_noise,
     fit_dipoles_on_ica,
     get_raw_subset,
     init_descriptor,
@@ -42,13 +44,17 @@ def get_bad_chs(
     pyprep_kwargs=None,
     notch_lines=np.arange(50, 151, 50),
     notch_width=1.0,
+    line_noise_crit=4.0,
+    flatline_crit=5.0,
 ):
-    """Detect bad EEG channels using PyPREP and FASTER.
+    """Detect bad EEG channels using PyPREP, FASTER, flatline, and line noise.
 
     Applies optional notch filtering and an average reference, then runs
-    PyPREP's NoisyChannels (nan/flat & correlation methods) and FASTER's
-    channel-level correlation on 1s fixed-length epochs. Returns a dictionary
-    containing the union of identified bad channels and the per-method results.
+    PyPREP's NoisyChannels (nan/flat & correlation methods), FASTER's
+    channel-level correlation on 1s fixed-length epochs, per-channel flatline
+    detection, and per-channel line-noise z-score detection.  Returns a
+    dictionary containing the union of all identified bad channels and
+    per-method breakdowns.
 
     Parameters
     ----------
@@ -66,15 +72,25 @@ def get_bad_chs(
         Pass ``None`` to skip notch filtering.
     notch_width : float
         Width of the notch filter in Hz.
+    line_noise_crit : float | None
+        Z-score threshold for the per-channel line noise criterion.
+        A channel is flagged as bad when its line-noise-to-broadband ratio
+        exceeds this many standard deviations above the mean across channels.
+        Pass ``None`` to skip this criterion.
+    flatline_crit : float | None
+        Maximum allowed duration (seconds) of a flatline segment.  Channels
+        that are flat for longer than this threshold are flagged as bad via
+        PyPREP's ``find_bad_by_nan_flat``.  Pass ``None`` to disable.
 
     Returns
     -------
     bad_ch_dict : dict
         Dictionary with the following keys:
 
-        - ``"all_bads"``: union of PyPREP, FASTER, and manual bads.
+        - ``"all_bads"``: union of PyPREP, FASTER, line-noise, and manual bads.
         - ``"pyprep"``: dict from PyPREP's ``get_bads(as_dict=True)``.
         - ``"faster"``: dict from FASTER with a ``"bad_all"`` union key.
+        - ``"bad_by_line_noise"``: channels flagged by per-channel line noise.
         - ``"bad_by_manual"``: manual bad channels.
     """
     raw = raw.copy()
@@ -93,10 +109,21 @@ def get_bad_chs(
     # Consensus preprocessing steps before finding bads
     raw = raw.set_eeg_reference("average", projection=True)
     if notch_lines is not None:
-        notch_lines = np.asarray(notch_lines)
+        notch_lines_arr = np.asarray(notch_lines)
         nyquist = raw.info["sfreq"] / 2
-        notch_lines = notch_lines[: np.searchsorted(notch_lines, nyquist, side="right")]
-        raw.notch_filter(freqs=notch_lines, notch_widths=notch_width)
+        notch_lines_arr = notch_lines_arr[
+            : np.searchsorted(notch_lines_arr, nyquist, side="right")
+        ]
+        raw.notch_filter(freqs=notch_lines_arr, notch_widths=notch_width)
+
+    # === Per-channel line noise detection (before PyPREP / FASTER) ===
+    bad_by_line_noise: list[str] = []
+    if line_noise_crit is not None and notch_lines is not None:
+        bad_by_line_noise = detect_bad_by_line_noise(
+            raw,
+            noise_freqs=np.asarray(notch_lines),
+            z_thresh=float(line_noise_crit),
+        )
 
     # === PyPREP ====
     default_pyprep_kwargs = {"reject_by_annotation": "omit"}
@@ -132,11 +159,13 @@ def get_bad_chs(
         for bad_chs_list in bads_dict.values():
             bad_chs.update(bad_chs_list)
     bad_chs.update(bad_by_manual)
+    bad_chs.update(bad_by_line_noise)
 
     bad_ch_dict = {
         "all_bads": list(bad_chs),
         "pyprep": bads_dict_pyprep,
         "faster": bads_dict_faster,
+        "bad_by_line_noise": bad_by_line_noise,
         "bad_by_manual": bad_by_manual,
     }
 
@@ -185,6 +214,12 @@ class EEGPreprocessor:
         *exclude_labels*.
     channel_types : dict | None
         Channel name → MNE type mapping applied right after loading.
+    ica_method : str
+        ICA algorithm.  ``"amica"`` (default) uses AMICA via
+        ``amica-python`` and converts to MNE ICA; falls back to picard if the
+        package is not installed.  Any other string is forwarded as the
+        ``method`` argument to :class:`mne.preprocessing.ICA` (e.g.
+        ``"picard"``, ``"fastica"``).  Ignored when ``fit_ica=False``.
     fit_ica : bool
         If ``False``, skip ICA entirely (``raw_clean`` equals ``raw_asr``).
     fit_dipoles : bool
@@ -210,6 +245,49 @@ class EEGPreprocessor:
         Extra keyword arguments forwarded to PyPREP's
         :class:`~pyprep.NoisyChannels`.  The ``random_state`` key is
         always overwritten with *rng_seed*.
+    line_noise_crit : float | None
+        Z-score threshold for the per-channel line-noise criterion in bad
+        channel detection.  ``None`` disables this criterion.
+    zapline_freqs : array-like | ``"europe"`` | ``"usa"`` | None
+        If not ``None``, applies ZapLine (DSS-based) spectral cleaning to the
+        main raw recording before the bandpass filter.  Accepts the same
+        string shortcuts as *notch_freqs*.  Pass ``None`` together with
+        ``zapline_method="adaptive"`` to enable auto-detection.
+    zapline_method : str
+        Algorithm used by :func:`compute_zapline`.  One of:
+
+        ``"adaptive"`` (default)
+            ZapLine-plus (mne-denoise) with adaptive frequency detection.
+        ``"zapline"``
+            Standard ZapLine (mne-denoise), fixed-frequency.
+        ``"dss_line"``
+            Single-pass DSS (meegkit).
+        ``"dss_line_iter"``
+            Iterative DSS (meegkit).
+    rename_channels : dict | str | None
+        Channel renaming applied immediately before any processing.
+
+        - ``dict``: explicit ``{old_name: new_name}`` mapping.
+        - ``str``: strip this prefix from every channel name that starts
+          with it (e.g. ``"BrainVision RDA_"``).
+        - ``None`` (default): no renaming.
+    final_filter_bands : tuple of float | None
+        If not ``None``, apply a final bandpass filter (MNE ``raw.filter``)
+        to ``raw_clean`` after ICA cleaning, average re-referencing, and bad
+        channel interpolation.  Useful for removing very slow drifts before
+        further analysis (e.g. ``(0.5, 40.0)``).
+    rv_thresh : float | None
+        Residual-variance threshold for dipole fitting.  Components whose
+        best-fitting dipole has RV >= *rv_thresh* are set to ``None`` in the
+        ``dipoles`` and ``residuals`` output lists.  ``None`` keeps all
+        dipoles.  Typical value: ``0.15`` (15 %).
+    remove_outside_head : bool
+        If ``True``, components whose dipole falls outside the head model
+        (position norm > 0.13 m) are set to ``None`` in the output lists.
+    skip_if_exists : bool
+        If ``True`` *and* ``overwrite=False``, skip the entire computation
+        when the primary output file ``{fname_out}_clean.fif.gz`` already
+        exists and return the previously saved results instead.
     """
 
     def __init__(
@@ -227,6 +305,7 @@ class EEGPreprocessor:
         exclude_labels: list | None = None,
         include_labels: set | None = frozenset({"brain", "other"}),
         channel_types: dict | None = None,
+        ica_method: str = "amica",
         fit_ica: bool = True,
         fit_dipoles: bool = False,
         trans: object = None,
@@ -235,6 +314,14 @@ class EEGPreprocessor:
         verbose: bool | str | int = True,
         event_id: dict | None = None,
         pyprep_kwargs: dict | None = None,
+        line_noise_crit: float | None = 4.0,
+        zapline_freqs=None,
+        zapline_method: str = "adaptive",
+        rename_channels=None,
+        final_filter_bands: tuple[float | None, float | None] | None = None,
+        rv_thresh: float | None = None,
+        remove_outside_head: bool = False,
+        skip_if_exists: bool = False,
     ):
         if not fit_ica and fit_dipoles:
             raise ValueError(
@@ -266,6 +353,7 @@ class EEGPreprocessor:
         self.exclude_labels = exclude_labels
         self.include_labels = include_labels
         self.channel_types = channel_types
+        self.ica_method = ica_method
         self.fit_ica = fit_ica
         self.fit_dipoles = fit_dipoles
         self.trans = trans
@@ -274,6 +362,14 @@ class EEGPreprocessor:
         self.verbose = verbose
         self.event_id = event_id
         self.pyprep_kwargs = pyprep_kwargs or {}
+        self.line_noise_crit = line_noise_crit
+        self.zapline_freqs = zapline_freqs
+        self.zapline_method = zapline_method
+        self.rename_channels = rename_channels
+        self.final_filter_bands = final_filter_bands
+        self.rv_thresh = rv_thresh
+        self.remove_outside_head = remove_outside_head
+        self.skip_if_exists = skip_if_exists
 
     # ------------------------------------------------------------------
     # Public entry points
@@ -358,10 +454,43 @@ class EEGPreprocessor:
         old_verbose = mne.set_log_level(verbose=self.verbose, return_old_level=True)
         timer = StepTimer()
 
+        # --- Skip-if-exists caching ---
+        if self.skip_if_exists and not overwrite and fname_out is not None:
+            _stem = Path(fname_out).with_suffix("")
+            _clean_path = _stem.parent / (_stem.name + "_clean.fif.gz")
+            if _clean_path.exists():
+                import logging as _log
+
+                _log.getLogger(__name__).info(
+                    f"skip_if_exists=True: loading cached outputs from {fname_out}"
+                )
+                return self._load_cached_outputs(fname_out)
+
         # --- Provenance ---
         filenames = [str(p) for p in getattr(raw, "filenames", []) if p]
         src = filenames[0] if len(filenames) == 1 else (filenames or None)
         set_descriptor(raw, init_descriptor(src, pipeline="EEGPreprocessor.run_raw"))
+
+        # --- Channel renaming ---
+        if self.rename_channels is not None:
+            if isinstance(self.rename_channels, dict):
+                raw.rename_channels(self.rename_channels)
+                append_desc(raw, name="rename_channels", mapping=self.rename_channels)
+            elif isinstance(self.rename_channels, str):
+                prefix = self.rename_channels
+                mapping = {
+                    ch: ch[len(prefix) :]
+                    for ch in raw.ch_names
+                    if ch.startswith(prefix)
+                }
+                if mapping:
+                    raw.rename_channels(mapping)
+                append_desc(raw, name="rename_channels", strip_prefix=prefix)
+            else:
+                raise TypeError(
+                    "rename_channels must be a dict or str, got"
+                    f" {type(self.rename_channels)!r}"
+                )
 
         # --- pre_hook ---
         pre_hook_description = None
@@ -376,6 +505,24 @@ class EEGPreprocessor:
             if pre_hook_description:
                 append_desc(raw, name="pre_hook", description=pre_hook_description)
 
+        # --- ZapLine spectral cleaning ---
+        if self.zapline_freqs is not None:
+            t0 = time.perf_counter()
+            raw = compute_zapline(
+                raw, noise_freqs=self.zapline_freqs, method=self.zapline_method
+            )
+            append_desc(
+                raw,
+                name="zapline",
+                method=self.zapline_method,
+                noise_freqs=list(
+                    np.atleast_1d(self.zapline_freqs).tolist()
+                    if not isinstance(self.zapline_freqs, str)
+                    else self.zapline_freqs
+                ),
+            )
+            timer.log_step("zapline", time.perf_counter() - t0)
+
         # --- Bad channel detection ---
         t0 = time.perf_counter()
         pyprep_kw = dict(self.pyprep_kwargs)
@@ -385,6 +532,7 @@ class EEGPreprocessor:
             pyprep_kwargs=pyprep_kw,
             notch_lines=np.asarray(self.notch_freqs),
             notch_width=1.0,
+            line_noise_crit=self.line_noise_crit,
         )
         raw.info["bads"] = bad_ch_dict["all_bads"]
         append_desc(
@@ -456,11 +604,12 @@ class EEGPreprocessor:
                 rng_seed=self.rng_seed,
                 exclude_labels=self.exclude_labels,
                 include_labels=self.include_labels,
+                ica_method=self.ica_method,
             )
             append_desc(
                 raw_asr,
                 name="ica",
-                method="picard_extended_infomax",
+                method=self.ica_method,
                 n_excluded=len(ica.exclude),
                 excluded=ica.exclude,
                 thresh=self.thresh,
@@ -476,7 +625,7 @@ class EEGPreprocessor:
                 random_state=self.rng_seed,
                 method="picard",
                 fit_params=dict(ortho=False, extended=True),
-            )
+            )  # stub - never fitted
             ic_labels = {}
 
         timer.log_step("ica", time.perf_counter() - t0)
@@ -485,8 +634,22 @@ class EEGPreprocessor:
         if self.fit_dipoles:
             t0 = time.perf_counter()
             trans_out = _handle_trans(self.trans, raw_asr.info)
-            dipoles, residuals = fit_dipoles_on_ica(ica, raw_asr.info, trans_out)
-            append_desc(raw_asr, name="dipole_fitting", n_dipoles=len(dipoles))
+            dipoles, residuals = fit_dipoles_on_ica(
+                ica,
+                raw_asr.info,
+                trans_out,
+                rv_thresh=self.rv_thresh,
+                remove_outside_head=self.remove_outside_head,
+            )
+            n_valid = sum(d is not None for d in dipoles)
+            append_desc(
+                raw_asr,
+                name="dipole_fitting",
+                n_dipoles=len(dipoles),
+                n_dipolar=n_valid,
+                rv_thresh=self.rv_thresh,
+                remove_outside_head=self.remove_outside_head,
+            )
             timer.log_step("fit_dipoles", time.perf_counter() - t0)
 
         # --- Apply ICA, avg-ref, interpolate ---
@@ -499,13 +662,38 @@ class EEGPreprocessor:
         append_desc(raw_clean, name="avg_ref")
         raw_minimal.set_eeg_reference(ref_channels="average")
         append_desc(raw_minimal, name="avg_ref")
+        # Exclude EOG-typed channels from interpolation (they are not on the
+        # scalp and spherical interpolation is not meaningful for them)
+        eog_chs = [
+            ch
+            for ch, d in zip(raw_clean.ch_names, raw_clean.info["chs"])
+            if d["kind"] == mne.io.constants.FIFF.FIFFV_EOG_CH
+        ]
+        bads_to_interp = [b for b in raw_clean.info["bads"] if b not in eog_chs]
+        raw_clean.info["bads"] = bads_to_interp
         raw_clean.interpolate_bads(reset_bads=True, method="spline")
         append_desc(
             raw_clean,
             name="interpolate_bads",
             method="spline",
-            interpolated=bad_ch_dict["all_bads"],
+            interpolated=bads_to_interp,
+            eog_excluded=eog_chs,
         )
+
+        # --- Post-ICA final bandpass ---
+        if self.final_filter_bands is not None:
+            l_freq, h_freq = self.final_filter_bands
+            if l_freq is not None:
+                raw_clean.filter(l_freq=l_freq, h_freq=None)
+            if h_freq is not None:
+                raw_clean.filter(l_freq=None, h_freq=h_freq)
+            append_desc(
+                raw_clean,
+                name="final_filter",
+                l_freq=l_freq,
+                h_freq=h_freq,
+            )
+
         timer.log_step("rereference_interpolate", time.perf_counter() - t0)
 
         # --- Save (optional) ---
@@ -624,3 +812,81 @@ class EEGPreprocessor:
                 overwrite=overwrite,
                 verbose="error",
             )
+
+    def _load_cached_outputs(self, fname_out):
+        """Load previously saved pipeline outputs from *fname_out*.
+
+        Used by the ``skip_if_exists`` fast-path in :meth:`run_raw`.
+        Returns the same 10-tuple as :meth:`run_raw`; missing files yield
+        ``None`` / empty collections.
+        """
+        fname_out = Path(fname_out).with_suffix("")
+
+        raw_minimal = mne.io.read_raw(
+            fname_out.with_name(fname_out.name + "_minimal.fif.gz"), verbose="error"
+        )
+        raw_clean = mne.io.read_raw(
+            fname_out.with_name(fname_out.name + "_clean.fif.gz"), verbose="error"
+        )
+
+        _asr_path = fname_out.with_name(fname_out.name + "_asr.fif.gz")
+        raw_asr = (
+            mne.io.read_raw(_asr_path, verbose="error")
+            if _asr_path.exists()
+            else raw_minimal
+        )
+
+        _subset_path = fname_out.with_name(fname_out.name + "_minimal-subset.fif.gz")
+        raw_subset = (
+            mne.io.read_raw(_subset_path, verbose="error")
+            if _subset_path.exists()
+            else None
+        )
+
+        _ica_path = fname_out.with_name(fname_out.name + "_ica.fif.gz")
+        ica = (
+            mne.preprocessing.read_ica(_ica_path, verbose="error")
+            if _ica_path.exists()
+            else mne.preprocessing.ICA(method="picard")
+        )
+
+        _labels_path = fname_out.with_name(fname_out.name + "_iclabels.json")
+        ic_labels: dict = {}
+        if _labels_path.exists():
+            with open(_labels_path) as f:
+                ic_labels = json.load(f)
+
+        _bad_path = fname_out.with_name(fname_out.name + "_bad_channels.json")
+        bad_ch_dict: dict = {}
+        if _bad_path.exists():
+            with open(_bad_path) as f:
+                bad_ch_dict = json.load(f)
+
+        _dipdir = fname_out.parent / f"{fname_out.name}_dipoles"
+        dipoles: list = []
+        residuals: list = []
+        if _dipdir.exists():
+            for dip_path in sorted(_dipdir.glob("ic-*-dip.bdip")):
+                dipoles.append(mne.read_dipole(dip_path))
+            for res_path in sorted(_dipdir.glob("ic-*-residual.fif.gz")):
+                residuals.append(mne.read_evokeds(res_path, verbose="error")[0])
+
+        _trans_path = fname_out.with_name(fname_out.name + "_trans.fif")
+        trans = (
+            mne.transforms.read_trans(_trans_path, verbose="error")
+            if _trans_path.exists()
+            else None
+        )
+
+        return (
+            raw_minimal,
+            raw_clean,
+            raw_asr,
+            raw_subset,
+            ica,
+            ic_labels,
+            dipoles,
+            residuals,
+            trans,
+            bad_ch_dict,
+        )
