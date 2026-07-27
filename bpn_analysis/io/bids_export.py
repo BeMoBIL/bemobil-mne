@@ -115,6 +115,12 @@ def export_to_bids(
     if extra_params:
         write_kwargs.update(extra_params)
 
+    # mne_bids requires explicit permission when raw is preloaded in memory
+    # (not backed by a file on disk) - default to BrainVision format.
+    if raw.preload and "allow_preload" not in write_kwargs:
+        write_kwargs["allow_preload"] = True
+        write_kwargs.setdefault("format", "BrainVision")
+
     bids_path_out = mne_bids.write_raw_bids(**write_kwargs)
     LOGGER.info(f"BIDS export complete: {bids_path_out.fpath}")
 
@@ -142,8 +148,7 @@ def make_bids_dataset_description(
     bids_root,
     name,
     authors=None,
-    version="1.0.0",
-    license_text=None,
+    data_license=None,
     acknowledgements=None,
     funding=None,
     doi=None,
@@ -161,10 +166,9 @@ def make_bids_dataset_description(
         Human-readable dataset name.
     authors : list of str | None
         Author names.
-    version : str
-        Dataset version string.
-    license_text : str | None
-        SPDX license identifier or free-text.
+    data_license : str | None
+        SPDX license identifier or free-text (maps to ``data_license`` in
+        BIDS ``dataset_description.json``).
     acknowledgements : str | None
         Acknowledgements text.
     funding : list of str | None
@@ -176,8 +180,7 @@ def make_bids_dataset_description(
         path=str(bids_root),
         name=name,
         authors=authors or [],
-        version=version,
-        license=license_text or "",
+        data_license=data_license or "",
         acknowledgements=acknowledgements or "",
         funding=funding or [],
         doi=doi or "",

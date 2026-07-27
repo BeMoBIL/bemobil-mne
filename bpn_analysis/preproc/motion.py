@@ -95,7 +95,10 @@ def process_rigid_body(
     4. Compute the second derivative (acceleration) in the same way.
 
     Derivative channels are appended to the returned raw object with the
-    naming scheme ``<rb>_vel_<axis>`` and ``<rb>_acc_<axis>``.
+    naming scheme ``<rb>_<type>_vel_<axis>`` and ``<rb>_<type>_acc_<axis>``,
+    where *type* is ``eul`` or ``pos`` so that orientation and position
+    derivatives always have distinct names (e.g. ``head_eul_vel_x``,
+    ``head_pos_vel_x``).
 
     Parameters
     ----------
@@ -342,12 +345,16 @@ def _lowpass_array(data, sfreq, cutoff):
 def _src_to_deriv(ch_name, suffix):
     """Rename a source channel to its derivative counterpart.
 
-    ``head_eul_x`` → ``head_vel_x`` (for suffix ``"_vel"``).
+    Preserves the segment type so that orientation and position derivatives
+    have distinct names and do not collide:
+
+    ``head_eul_x`` → ``head_eul_vel_x`` (for suffix ``"_vel"``)
+    ``head_pos_x`` → ``head_pos_vel_x`` (for suffix ``"_vel"``)
     """
-    # Replace the last segment type indicator (eul / pos / vel) with suffix
     for segment in ("_eul_", "_pos_", "_vel_", "_quat_"):
         if segment in ch_name:
             axis = ch_name.split(segment)[-1]
             rb = ch_name.split(segment)[0]
-            return f"{rb}{suffix}_{axis}"
+            seg_type = segment.strip("_")  # "eul", "pos", "vel", "quat"
+            return f"{rb}_{seg_type}{suffix}_{axis}"
     return f"{ch_name}{suffix}"

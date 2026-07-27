@@ -238,6 +238,12 @@ def sig_params(func, **kwargs):
     """
     try:
         sig = inspect.signature(func)
+        # If the function accepts **kwargs all passed keys flow through
+        if any(
+            p.kind == inspect.Parameter.VAR_KEYWORD
+            for p in sig.parameters.values()
+        ):
+            return dict(kwargs)
         return {k: v for k, v in kwargs.items() if k in sig.parameters}
     except (ValueError, TypeError):
         return kwargs
@@ -1009,10 +1015,8 @@ def compute_zapline(
                 "method='adaptive' for auto-detection."
             )
         try:
-            if method == "dss_line":
-                from meegkit.dss import dss_line as _dss_fn
-            else:
-                from meegkit.dss import dss_line_iter as _dss_fn
+            from meegkit.dss import dss_line as _dss_line
+            from meegkit.dss import dss_line_iter as _dss_line_iter
         except ImportError:
             _warnings.warn(
                 "meegkit is not installed; compute_zapline cannot run "
@@ -1031,13 +1035,22 @@ def compute_zapline(
                 f"ZapLine ({method}): removing {freq} Hz noise "
                 f"({n_remove} component(s))"
             )
-            result = _dss_fn(
-                data,
-                fline=freq,
-                sfreq=raw.info["sfreq"],
-                nfft=int(raw.info["sfreq"]),
-                nkeep=n_remove,
-            )
+            if method == "dss_line":
+                # nremove controls how many DSS components to zero out
+                result = _dss_line(
+                    data,
+                    fline=freq,
+                    sfreq=raw.info["sfreq"],
+                    nfft=int(raw.info["sfreq"]),
+                    nremove=n_remove,
+                )
+            else:  # dss_line_iter
+                # Iterative method - number of removed components is automatic
+                result = _dss_line_iter(
+                    data,
+                    fline=freq,
+                    sfreq=raw.info["sfreq"],
+                )
             # dss_line returns (y, artifact, n_iter); dss_line_iter returns (y, n_iter)
             data = result[0]
 
