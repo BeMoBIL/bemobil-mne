@@ -36,8 +36,6 @@ bemobil_mne/
 
 **`viz`** - ERP and PSD plotting utilities built on MNE and matplotlib.
 
-**`analysis`** - Project-specific scripts. Not part of the importable API.
-
 **`examples`** - Self-contained scripts demonstrating major features. Run directly or open as notebooks (percent-format cells).
 
 ## Quick start
