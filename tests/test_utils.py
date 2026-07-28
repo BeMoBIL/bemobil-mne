@@ -163,6 +163,7 @@ def test_append_desc_accumulates_steps(tiny_raw):
 
 def test_sig_params_filters_correctly():
     """Return only kwargs accepted by the signature."""
+
     def fn(a, b, c=3):
         """Accept positional and keyword arguments."""
         pass
@@ -174,6 +175,7 @@ def test_sig_params_filters_correctly():
 
 def test_sig_params_passes_all_when_var_kwargs():
     """Pass all kwargs through var-kwargs functions."""
+
     def fn(**kwargs):
         """Accept any keyword arguments."""
         pass
@@ -225,7 +227,9 @@ def eeg_with_line_noise(rng):
 
 def test_compute_zapline_dss_line_runs(eeg_with_line_noise):
     """Run dss_line zapline without error, preserve shape."""
-    raw_clean = compute_zapline(eeg_with_line_noise, noise_freqs=50.0, method="dss_line")
+    raw_clean = compute_zapline(
+        eeg_with_line_noise, noise_freqs=50.0, method="dss_line"
+    )
     assert raw_clean.get_data().shape == eeg_with_line_noise.get_data().shape
 
 
@@ -241,7 +245,9 @@ def test_compute_zapline_dss_line_reduces_noise(eeg_with_line_noise):
     """Power at 50 Hz should decrease after ZapLine."""
     sfreq = eeg_with_line_noise.info["sfreq"]
     data_before = eeg_with_line_noise.get_data(picks=[0])
-    raw_clean = compute_zapline(eeg_with_line_noise, noise_freqs=50.0, method="dss_line")
+    raw_clean = compute_zapline(
+        eeg_with_line_noise, noise_freqs=50.0, method="dss_line"
+    )
     data_after = raw_clean.get_data(picks=[0])
 
     freqs = np.fft.rfftfreq(data_before.shape[1], d=1.0 / sfreq)
@@ -288,9 +294,7 @@ def test_compute_zapline_above_nyquist_skipped(eeg_with_line_noise):
     raw_clean = compute_zapline(
         eeg_with_line_noise, noise_freqs=sfreq, method="dss_line"
     )
-    np.testing.assert_array_equal(
-        raw_clean.get_data(), eeg_with_line_noise.get_data()
-    )
+    np.testing.assert_array_equal(raw_clean.get_data(), eeg_with_line_noise.get_data())
 
 
 def test_compute_zapline_none_freq_raises_for_dss(eeg_with_line_noise):
@@ -341,7 +345,12 @@ def test_detect_bad_by_line_noise_empty_when_no_eeg(rng):
 def test_compute_mi_reduction_returns_expected_keys(tiny_raw):
     """Return dict with all four expected keys."""
     result = compute_mi_reduction(tiny_raw, tiny_raw)
-    assert set(result.keys()) == {"mi_before", "mi_after", "mi_reduction", "mi_reduction_pct"}
+    assert set(result.keys()) == {
+        "mi_before",
+        "mi_after",
+        "mi_reduction",
+        "mi_reduction_pct",
+    }
 
 
 def test_compute_mi_reduction_identical_raws(tiny_raw):

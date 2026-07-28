@@ -25,8 +25,8 @@ from bemobil_mne.preproc import (
 
 # %% Settings & Constants
 
-SFREQ = 120.0     # typical motion capture rate (Hz)
-DURATION = 10.0   # seconds
+SFREQ = 120.0  # typical motion capture rate (Hz)
+DURATION = 10.0  # seconds
 
 # %% Build synthetic Raw with motion capture channels
 
@@ -37,10 +37,20 @@ n_times = int(SFREQ * DURATION)
 # Quaternion channels: _quat_x, _quat_y, _quat_z, _quat_w
 # Position channels:   _pos_x, _pos_y, _pos_z
 ch_names = [
-    "head_quat_x", "head_quat_y", "head_quat_z", "head_quat_w",
-    "head_pos_x",  "head_pos_y",  "head_pos_z",
-    "rhand_quat_x", "rhand_quat_y", "rhand_quat_z", "rhand_quat_w",
-    "rhand_pos_x",  "rhand_pos_y",  "rhand_pos_z",
+    "head_quat_x",
+    "head_quat_y",
+    "head_quat_z",
+    "head_quat_w",
+    "head_pos_x",
+    "head_pos_y",
+    "head_pos_z",
+    "rhand_quat_x",
+    "rhand_quat_y",
+    "rhand_quat_z",
+    "rhand_quat_w",
+    "rhand_pos_x",
+    "rhand_pos_y",
+    "rhand_pos_z",
 ]
 n_ch = len(ch_names)
 
@@ -65,9 +75,9 @@ print("Detected rigid bodies:", rb_names)  # ['head', 'rhand']
 
 raw_motion, rb_info = process_rigid_body(
     raw,
-    lowpass_orient=8.0,        # low-pass orientation signals at 8 Hz
-    lowpass_pos=8.0,           # low-pass position at 8 Hz
-    lowpass_deriv=24.0,        # low-pass velocity/acceleration at 24 Hz
+    lowpass_orient=8.0,  # low-pass orientation signals at 8 Hz
+    lowpass_pos=8.0,  # low-pass position at 8 Hz
+    lowpass_deriv=24.0,  # low-pass velocity/acceleration at 24 Hz
     compute_velocity=True,
     compute_acceleration=True,
 )

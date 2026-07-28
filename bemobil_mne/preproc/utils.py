@@ -240,8 +240,7 @@ def sig_params(func, **kwargs):
         sig = inspect.signature(func)
         # If the function accepts **kwargs all passed keys flow through
         if any(
-            p.kind == inspect.Parameter.VAR_KEYWORD
-            for p in sig.parameters.values()
+            p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
         ):
             return dict(kwargs)
         return {k: v for k, v in kwargs.items() if k in sig.parameters}
@@ -580,6 +579,7 @@ def compute_ica(
         _nyquist_ica = raw_ica.info["sfreq"] / 2
         if _h_freq_ica >= _nyquist_ica:
             import warnings as _w
+
             _h_freq_ica = _nyquist_ica * 0.99
             _w.warn(
                 f"filter_bands_ica h_freq clipped to {_h_freq_ica:.2f} Hz "
