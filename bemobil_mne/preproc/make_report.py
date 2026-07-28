@@ -248,6 +248,169 @@ def _add_ica_segments(
     del orig_annotations
 
 
+def _find_missing_spans(annotations) -> list[tuple[float, float, str]]:
+    """Return ``(onset, duration, description)`` for every gap-fill annotation.
+
+    These are the ``BAD_<label>_missing`` annotations added by
+    :meth:`~bemobil_mne.io.XDFLoader._annotate_nan_regions` wherever an
+    auxiliary Tier-1 stream had to be NaN-filled (and then zero-filled) to
+    cover a gap.
+    """
+    spans = []
+    for onset, duration, desc in zip(
+        annotations.onset, annotations.duration, annotations.description
+    ):
+        if desc.startswith("BAD_") and desc.endswith("_missing"):
+            spans.append((float(onset), float(duration), str(desc)))
+    return spans
+
+
+def _add_full_length_stream_plots(
+    report,
+    raw: mne.io.BaseRaw,
+    *,
+    section: str = "Full-length stream traces",
+) -> None:
+    """Plot every non-EEG channel type in *raw* across its full duration.
+
+    Intended for visually spotting drop-outs (flatlines / NaN-filled gaps) in
+    auxiliary Tier-1 streams (ECG, EDA, gaze, EMG, ...) that would otherwise
+    only be visible as short scrollable segments in the standard raw-trace
+    view.  Gap-fill regions (``BAD_*_missing`` annotations, from any stream)
+    are shaded on every plot for reference.
+    """
+    ch_type_map = dict(zip(raw.ch_names, raw.get_channel_types()))
+    types_present = sorted(set(ch_type_map.values()) - {"eeg", "stim"})
+    if not types_present:
+        return
+
+    missing_spans = _find_missing_spans(raw.annotations)
+    times = raw.times
+
+    for ch_type in types_present:
+        ch_names = [ch for ch, t in ch_type_map.items() if t == ch_type]
+        try:
+            data = raw.get_data(picks=ch_names)
+        except Exception as exc:
+            warnings.warn(f"Skipping full-length plot for '{ch_type}': {exc}")
+            continue
+
+        n_ch = len(ch_names)
+        fig, axes = plt.subplots(
+            n_ch, 1, figsize=(10, max(1.5 * n_ch, 2.5)), sharex=True, squeeze=False
+        )
+        for i, ch_name in enumerate(ch_names):
+            ax = axes[i, 0]
+            ax.plot(times, data[i], linewidth=0.6)
+            ax.set_ylabel(ch_name, fontsize=8)
+            for onset, duration, _desc in missing_spans:
+                ax.axvspan(onset, onset + duration, color="red", alpha=0.15)
+        axes[-1, 0].set_xlabel("Time (s)")
+        fig.suptitle(f"Full-length trace: {ch_type} ({n_ch} channel(s))")
+        fig.set_layout_engine("constrained")
+
+        if missing_spans:
+            labels = sorted({desc for _, _, desc in missing_spans})
+            caption = (
+                f"Shaded red = gap-fill regions from any stream "
+                f"({len(missing_spans)} total): " + ", ".join(labels)
+            )
+        else:
+            caption = "No gap-fill regions detected in this recording."
+
+        _add_temp_image(
+            report,
+            fig,
+            title=f"Full-length trace: {ch_type}",
+            caption=caption,
+            section=section,
+        )
+        plt.close(fig)
+
+
+def _add_tier2_stream_plots(
+    report,
+    tier2: dict[str, tuple[np.ndarray, np.ndarray]],
+    *,
+    section: str = "Tier-2 stream traces (native rate)",
+    max_bins: int = 3000,
+) -> None:
+    """Plot every Tier-2 stream (native rate, not merged into ``raw``) in full.
+
+    Each channel is shown as a decimated envelope (mean absolute amplitude
+    per time bin) spanning the entire recording, so long-run drop-outs are
+    visible without rendering every sample.  Timestamp gaps larger than 3x
+    the stream's median inter-sample interval are shaded and summarised in
+    the caption -- a strong signal of a genuine drop-out rather than a quiet
+    signal.
+    """
+    if not tier2:
+        return
+
+    for label, (data, ts) in tier2.items():
+        data = np.asarray(data, dtype=float)
+        ts = np.asarray(ts, dtype=float)
+        if data.ndim == 1:
+            data = data[:, None]
+        if len(ts) < 2:
+            continue
+
+        n_ch = data.shape[1]
+        duration = float(ts[-1] - ts[0])
+
+        dt = np.diff(ts)
+        median_dt = float(np.median(dt)) if len(dt) else 0.0
+        if median_dt > 0:
+            gap_mask = dt > median_dt * 3
+        else:
+            gap_mask = np.zeros(0, dtype=bool)
+        gap_starts = ts[:-1][gap_mask]
+        gap_ends = ts[1:][gap_mask]
+        gap_total = float(np.sum(gap_ends - gap_starts)) if len(gap_starts) else 0.0
+
+        n_bins = min(max_bins, len(ts))
+        fig, axes = plt.subplots(
+            n_ch, 1, figsize=(10, max(1.5 * n_ch, 2.5)), sharex=True, squeeze=False
+        )
+        for ch_idx in range(n_ch):
+            ax = axes[ch_idx, 0]
+            if n_bins > 1:
+                bin_edges = np.linspace(ts[0], ts[-1], n_bins + 1)
+                bin_idx = np.clip(np.digitize(ts, bin_edges) - 1, 0, n_bins - 1)
+                envelope = np.zeros(n_bins)
+                counts = np.zeros(n_bins)
+                np.add.at(envelope, bin_idx, np.abs(data[:, ch_idx]))
+                np.add.at(counts, bin_idx, 1)
+                with np.errstate(invalid="ignore", divide="ignore"):
+                    envelope = np.where(
+                        counts > 0, envelope / np.maximum(counts, 1), np.nan
+                    )
+                bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
+                ax.plot(bin_centers, envelope, linewidth=0.7)
+            else:
+                ax.plot(ts, data[:, ch_idx], linewidth=0.7)
+            for gs, ge in zip(gap_starts, gap_ends):
+                ax.axvspan(gs, ge, color="red", alpha=0.2)
+            ax.set_ylabel(f"ch {ch_idx}" if n_ch > 1 else label, fontsize=8)
+        axes[-1, 0].set_xlabel("Time (s, relative to session_t0)")
+        fig.suptitle(f"Tier-2 stream: {label} (duration={duration:.1f}s, {n_ch} ch)")
+        fig.set_layout_engine("constrained")
+
+        caption = (
+            f"{len(gap_starts)} timestamp gap(s) > 3x median inter-sample "
+            f"interval ({median_dt * 1000:.1f} ms), totaling {gap_total:.2f}s."
+        )
+
+        _add_temp_image(
+            report,
+            fig,
+            title=f"Tier-2: {label}",
+            caption=caption,
+            section=section,
+        )
+        plt.close(fig)
+
+
 def _plot_dipoles_figure(dipole_idx, dipoles, ica, residuals, trans):
     """Return a matplotlib figure showing one dipole with IC/residual insets."""
     from mpl_toolkits.axes_grid1.inset_locator import inset_axes
@@ -341,8 +504,19 @@ def make_report(
     event_id: dict | None = None,
     thresh: float = 0.7,
     step_timings: list[dict] | None = None,
+    tier2: dict[str, tuple[np.ndarray, np.ndarray]] | None = None,
 ) -> mne.Report:
-    """Build and return an mne.Report for EEGPreprocessor outputs."""
+    """Build and return an mne.Report for EEGPreprocessor outputs.
+
+    Parameters
+    ----------
+    tier2 : dict | None
+        Tier-2 streams from :class:`~bemobil_mne.io.MultimodalRecording`
+        (kept at native rate, not merged into ``raw``), e.g. audio.  When
+        provided, each stream is plotted in full as a decimated envelope
+        with detected timestamp gaps shaded, in a dedicated report section.
+        ``None`` (default) skips this section.
+    """
     # Force headless Agg backend - same reason as in standard_scripts
     matplotlib.use("Agg", force=True)
 
@@ -419,6 +593,19 @@ def make_report(
         raw_eeg = src.copy().pick("eeg")
         report.add_raw(raw_eeg, title=label, psd=True)
         del raw_eeg
+
+    # --- Full-length non-EEG Tier-1 stream traces (drop-out inspection) ---
+    try:
+        _add_full_length_stream_plots(report, raw_minimal)
+    except Exception as exc:
+        warnings.warn(f"Skipping full-length Tier-1 stream plots: {exc}")
+
+    # --- Full-length Tier-2 stream traces (drop-out inspection) ---
+    if tier2:
+        try:
+            _add_tier2_stream_plots(report, tier2)
+        except Exception as exc:
+            warnings.warn(f"Skipping Tier-2 stream plots: {exc}")
 
     # --- Annotation counts ---
     annot_counts = raw_minimal.annotations.count()
