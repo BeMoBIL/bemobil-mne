@@ -54,8 +54,7 @@ with tempfile.TemporaryDirectory() as tmpdir:
         bids_root=bids_root,
         name="eegbci-motor-imagery-demo",
         authors=["BPN Lab"],
-        version="1.0.0",
-        license_text="CC0",
+        data_license="CC0",
     )
 
     bids_path = export_to_bids(
@@ -85,7 +84,6 @@ with tempfile.TemporaryDirectory() as tmpdir:
         bids_root=bids_root,
         name="eegbci-motor-imagery-demo",
         authors=["BPN Lab"],
-        version="1.0.0",
     )
 
     # subject_runs: list of dicts, one entry per run
