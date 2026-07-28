@@ -709,11 +709,12 @@ def fit_dipoles_on_ica(
         the output lists (flagged as non-dipolar).  Typical value: ``0.15``
         (15 %).  ``None`` disables filtering.
     n_dipoles : int
-        Number of dipoles to fit per IC.  ``1`` (default) fits a single
-        equivalent current dipole.  ``2`` fits a bilateral pair, mirroring
-        BeMoBIL's ``number_of_dipoles=2`` option.  MNE fits both dipoles
-        simultaneously; the first entry in each returned list is the primary
-        dipole and the second (if requested) is the symmetric partner.
+        Number of dipoles to fit per IC.  ``1`` (default, and currently the
+        only supported value) fits a single equivalent current dipole via
+        :func:`mne.fit_dipole`.  ``2`` is reserved for a future bilateral
+        pair fit mirroring BeMoBIL's ``number_of_dipoles=2`` option -- MNE
+        has no built-in constrained two-dipole fit, so this is not yet
+        implemented and currently raises :class:`NotImplementedError`.
     remove_outside_head : bool
         If ``True``, components whose best-fitting dipole is located outside
         the head model (norm of position > 0.13 m from the origin) are
@@ -726,8 +727,21 @@ def fit_dipoles_on_ica(
         was filtered by *rv_thresh* or *remove_outside_head*.
     residuals : list[mne.Evoked | None]
         Residual field per component (``None`` for filtered components).
+
+    Raises
+    ------
+    NotImplementedError
+        If ``n_dipoles=2`` is requested (bilateral fitting is not yet
+        implemented).
+    ValueError
+        If *n_dipoles* is not ``1`` or ``2``.
     """
-    if n_dipoles not in (1, 2):
+    if n_dipoles == 2:
+        raise NotImplementedError(
+            "n_dipoles=2 (bilateral dipole fitting) is not yet implemented; "
+            "only n_dipoles=1 is currently supported."
+        )
+    if n_dipoles != 1:
         raise ValueError(f"n_dipoles must be 1 or 2, got {n_dipoles}")
 
     fs_dir = mne.datasets.fetch_fsaverage(verbose=False)
@@ -745,9 +759,6 @@ def fit_dipoles_on_ica(
         evoked.info["dev_head_t"] = mne.Transform(fro="meg", to="head")
 
     fit_kwargs = dict(cov=cov, bem=bem, trans=trans, verbose=False)
-    if n_dipoles == 2:
-        # Bilateral: constrain to symmetric positions about x=0
-        fit_kwargs["n_jobs"] = 1
 
     dipoles_all, residuals_raw = mne.fit_dipole(evoked, **fit_kwargs)
 

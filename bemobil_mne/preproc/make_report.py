@@ -97,17 +97,29 @@ def _timings_to_html(step_timings: list[dict]) -> str:
     )
 
 
-def _iclabel_to_html(ic_labels: dict, thresh: float) -> str:
-    """Return an HTML table of ICLabel predictions."""
+def _iclabel_to_html(ic_labels: dict, thresh: float, excluded: list) -> str:
+    """Return an HTML table of ICLabel predictions.
+
+    Parameters
+    ----------
+    excluded : list of int
+        Component indices actually excluded by :func:`compute_ica`
+        (``ica.exclude``), i.e. the ground truth for that run's
+        ``include_labels``/``exclude_labels``/*thresh* configuration.  Rows
+        are highlighted based on membership in this list rather than
+        re-deriving the decision from *label*, since the criteria that
+        produced *excluded* may not simply be "not brain/other".
+    """
     labels = ic_labels.get("labels", [])
     probas = ic_labels.get("y_pred_proba", [])
     if not labels:
         return "<p>No ICLabel data available.</p>"
 
+    excluded_set = set(excluded)
     rows_html = []
     for idx, (label, proba_row) in enumerate(zip(labels, probas)):
         max_prob = float(np.max(proba_row))
-        flagged = label not in {"brain", "other"} and max_prob >= thresh
+        flagged = idx in excluded_set
         row_style = " style='background:#ffe0e0'" if flagged else ""
         rows_html.append(
             f"<tr{row_style}><td>{idx}</td><td>{label}</td><td>{max_prob:.3f}</td></tr>"
@@ -118,7 +130,7 @@ def _iclabel_to_html(ic_labels: dict, thresh: float) -> str:
         "<table border='1' style='border-collapse:collapse;'>"
         f"{header}{''.join(rows_html)}</table>"
         f"<p>Threshold: <code>{thresh}</code>. "
-        "Red rows = excluded components.</p>"
+        "Red rows = components actually excluded by <code>compute_ica</code>.</p>"
     )
 
 
@@ -517,7 +529,7 @@ def make_report(
         with detected timestamp gaps shaded, in a dedicated report section.
         ``None`` (default) skips this section.
     """
-    # Force headless Agg backend - same reason as in standard_scripts
+    # Force headless Agg backend so report generation works without a display
     matplotlib.use("Agg", force=True)
 
     old_log_level = mne.set_log_level("warning", return_old_level=True)
@@ -718,7 +730,7 @@ def make_report(
 
         # ICLabel table and histogram
         report.add_html(
-            _iclabel_to_html(ic_labels, thresh=thresh),
+            _iclabel_to_html(ic_labels, thresh=thresh, excluded=excluded),
             title="ICLabel outputs",
         )
 

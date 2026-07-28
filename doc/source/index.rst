@@ -9,9 +9,9 @@ It provides a full analysis stack built on top of `MNE-Python <https://mne.tools
 
 - **Multimodal loading**  -  read XDF recordings and align auxiliary streams (ECG, gaze, EMG, EDA)
   to a common time grid using the :class:`~bemobil_mne.io.XDFLoader`.
-- **EEG preprocessing pipeline**  -  bandpass filter → ZapLine line-noise removal → bad channel
-  detection → optional ASR → AMICA/ICA → ICLabel classification → dipole fitting, all in one
-  :class:`~bemobil_mne.preproc.EEGPreprocessor` call with full provenance tracking.
+- **EEG preprocessing pipeline**  -  ZapLine line-noise removal → bad channel detection →
+  bandpass filter → optional ASR → AMICA/ICA → ICLabel classification → dipole fitting, all in
+  one :class:`~bemobil_mne.preproc.EEGPreprocessor` call with full provenance tracking.
 - **BIDS export**  -  write cleaned datasets to the BIDS standard via
   :func:`~bemobil_mne.io.export_to_bids`.
 - **Motion capture**  -  rigid-body kinematics from XDF motion streams via

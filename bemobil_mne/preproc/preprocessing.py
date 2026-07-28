@@ -213,10 +213,10 @@ def _expand_line_noise_freq(line_noise_freq, sfreq):
 
 
 class EEGPreprocessor:
-    """EEG preprocessing pipeline: filter → bad channels → ASR → ICA → save.
+    """Preprocess EEG.
 
-    Mirrors the ``run_preprocessing`` API from ``standard_scripts`` while
-    following the ``bemobil_mne`` code conventions.
+    preprocessing pipeline: ZapLine → bad channels → filter → ASR →
+    ICA → dipole fitting → average re-reference → interpolate → save.
 
     Parameters are listed in pipeline order.
 
@@ -476,6 +476,13 @@ class EEGPreprocessor:
     ) -> tuple:
         """Load *fname_in* and run the full preprocessing pipeline.
 
+        Uses :attr:`loader` (an :class:`~bemobil_mne.io.XDFLoader`), whose
+        :meth:`~bemobil_mne.io.XDFLoader.load` returns a
+        :class:`~bemobil_mne.io.MultimodalRecording`.  Only the Tier-1
+        ``raw`` object is preprocessed; ``tier2`` is forwarded to
+        :meth:`run_raw` for the report's drop-out plots, and ``events`` is
+        discarded (call :meth:`run_raw` directly if you need it).
+
         Parameters
         ----------
         fname_in : str | Path
@@ -489,11 +496,14 @@ class EEGPreprocessor:
         -------
         Same as :meth:`run_raw`.
         """
-        raw = self.loader.load(fname_in)
+        rec = self.loader.load(fname_in)
+        raw = rec.raw
         if self.channel_types:
             raw.set_channel_types(self.channel_types)
         raw.set_montage(mne.channels.make_standard_montage("standard_1005"))
-        return self.run_raw(raw, fname_out=fname_out, overwrite=overwrite)
+        return self.run_raw(
+            raw, fname_out=fname_out, overwrite=overwrite, tier2=rec.tier2
+        )
 
     def run_raw(
         self,

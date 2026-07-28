@@ -12,7 +12,7 @@ bemobil_mne/
 │   ├── bids_export.py           # BIDS export wrappers around mne_bids
 │   └── utils.py                 # I/O helpers
 ├── preproc/                     # Preprocessing
-│   ├── preprocessing.py         # EEGPreprocessor: filter -> bad ch -> ASR -> ICA pipeline
+│   ├── preprocessing.py         # EEGPreprocessor: ZapLine -> bad ch -> filter -> ASR -> ICA pipeline
 │   ├── epoching.py              # EpochPreparer, stimulus renaming helpers
 │   ├── motion.py                # Rigid body kinematics (find, process, split)
 │   └── utils.py                 # ASR, ZapLine, ICA, dipole fitting, provenance, misc
@@ -20,7 +20,8 @@ bemobil_mne/
 │   ├── plotting.py              # ERP, PSD, and component plots
 │   └── utils.py                 # Plot helpers
 ├── examples/                    # Runnable example scripts
-│   ├── preprocess_and_plot.py   # Full EEG preprocessing + visualization walkthrough
+│   ├── preprocessing.py         # Full EEG preprocessing walkthrough
+│   ├── plotting.py               # Visualization walkthrough (run preprocessing.py first)
 │   ├── xdf_loading.py           # XDF multimodal loading
 │   ├── motion_processing.py     # Rigid body kinematics
 │   └── bids_export_example.py   # BIDS export
@@ -30,7 +31,7 @@ bemobil_mne/
 
 ## Modules
 
-**`io`** - Load XDF multimodal recordings into MNE Raw objects, align auxiliary streams (ECG, gaze, EMG) to a common time grid, and export datasets to BIDS.
+**`io`** - Load XDF multimodal recordings into MNE Raw objects, align auxiliary streams (ECG, gaze, EMG, EDA) to a common time grid, and export datasets to BIDS.
 
 **`preproc`** - Full EEG preprocessing pipeline (bandpass, bad channel detection, ASR, ICA, dipole fitting), epoch preparation, and rigid body motion capture kinematics.
 
@@ -60,13 +61,14 @@ See `examples/` for complete worked examples:
 | Feature | Example script |
 | --------- | --------------- |
 | XDF multimodal loading | `examples/xdf_loading.py` |
-| EEG preprocessing pipeline | `examples/preprocess_and_plot.py` |
+| EEG preprocessing pipeline | `examples/preprocessing.py` |
+| Visualization (run preprocessing.py first) | `examples/plotting.py` |
 | Rigid body kinematics | `examples/motion_processing.py` |
 | BIDS export | `examples/bids_export_example.py` |
 
 ## Contributing
 
-This is a private repository for BPN lab members. Contributions are made via feature branches and pull requests rather than forks.
+This is a private repository for BPN lab members. Contributions are made via feature branches and pull requests against a personal fork's `upstream` remote (see `.github/CONTRIBUTING.md`).
 
 ### Setup
 
@@ -117,7 +119,7 @@ This is a private repository for BPN lab members. Contributions are made via fea
 
 ### Testing
 
-Tests live in `tests/` and follow the same structure as `standard_scripts`. Run the full suite from the repo root:
+Tests live in `tests/`. Run the full suite from the repo root:
 
 ```bash
 pip install -e ".[test]"   # first time only
