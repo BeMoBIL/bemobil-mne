@@ -1,4 +1,4 @@
-"""Tests for bpn_analysis.preproc.preprocessing."""
+"""Tests for bemobil_mne.preproc.preprocessing."""
 
 # %% Imports
 
@@ -6,7 +6,7 @@ import mne
 import numpy as np
 import pytest
 
-from bpn_analysis.preproc.preprocessing import EEGPreprocessor, get_bad_chs
+from bemobil_mne.preproc.preprocessing import EEGPreprocessor, get_bad_chs
 
 # %% Helpers
 
@@ -209,7 +209,7 @@ def test_eegpreprocessor_rename_channels(tmp_path, sample_raw):
 @pytest.mark.slowtest
 def test_eegpreprocessor_provenance_recorded(tmp_path, sample_raw):
     """Record a provenance descriptor in raw.info."""
-    from bpn_analysis.preproc.utils import get_descriptor
+    from bemobil_mne.preproc.utils import get_descriptor
 
     proc = EEGPreprocessor(loader=None, fit_ica=False)
     raw_out, _, _ = proc.run_raw(sample_raw.copy(), fname_out=None)

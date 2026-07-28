@@ -1,4 +1,4 @@
-"""Tests for bpn_analysis.io.xdf private helpers."""
+"""Tests for bemobil_mne.io.xdf private helpers."""
 
 # %% Imports
 
@@ -6,7 +6,7 @@ import logging
 
 import pytest
 
-from bpn_analysis.io.xdf import (
+from bemobil_mne.io.xdf import (
     _FIF_CH_ABBREVIATIONS,
     _FIF_MAX_CH_LEN,
     _match_stream,

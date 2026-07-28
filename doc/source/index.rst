@@ -1,21 +1,21 @@
-BeMoBIL-Python
+BeMoBIL-MNE
 ============
 
-**BeMoBIL-Python** is a Python library for EEG and multimodal Mobile Brain/Body Imaging (MoBI)
+**BeMoBIL-MNE** is a Python library for EEG and multimodal Mobile Brain/Body Imaging (MoBI)
 data processing, developed at the `Biopsychology & Neuroergonomics department
 <https://www.bpn.tu-berlin.de>`_ at TU Berlin.
 
 It provides a full analysis stack built on top of `MNE-Python <https://mne.tools>`_:
 
 - **Multimodal loading**  -  read XDF recordings and align auxiliary streams (ECG, gaze, EMG, EDA)
-  to a common time grid using the :class:`~bemobil_python.io.XDFLoader`.
+  to a common time grid using the :class:`~bemobil_mne.io.XDFLoader`.
 - **EEG preprocessing pipeline**  -  bandpass filter → ZapLine line-noise removal → bad channel
   detection → optional ASR → AMICA/ICA → ICLabel classification → dipole fitting, all in one
-  :class:`~bemobil_python.preproc.EEGPreprocessor` call with full provenance tracking.
+  :class:`~bemobil_mne.preproc.EEGPreprocessor` call with full provenance tracking.
 - **BIDS export**  -  write cleaned datasets to the BIDS standard via
-  :func:`~bemobil_python.io.export_to_bids`.
+  :func:`~bemobil_mne.io.export_to_bids`.
 - **Motion capture**  -  rigid-body kinematics from XDF motion streams via
-  :func:`~bemobil_python.preproc.find_rigid_bodies`.
+  :func:`~bemobil_mne.preproc.find_rigid_bodies`.
 - **Visualization**  -  ERP, PSD, TFR, and topomap plots built on MNE and matplotlib.
 
 The pipeline is designed to replicate and extend the MATLAB-based
@@ -41,8 +41,8 @@ Quick start
 
 .. code-block:: python
 
-   from bemobil_python.io import XDFLoader
-   from bemobil_python.preproc import EEGPreprocessor
+   from bemobil_mne.io import XDFLoader
+   from bemobil_mne.preproc import EEGPreprocessor
 
    # 1. Load a multimodal XDF recording
    loader = XDFLoader(

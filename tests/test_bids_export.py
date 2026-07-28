@@ -1,4 +1,4 @@
-"""Tests for bpn_analysis.io.bids_export."""
+"""Tests for bemobil_mne.io.bids_export."""
 
 # %% Imports
 
@@ -9,7 +9,7 @@ import mne_bids
 import numpy as np
 import pytest
 
-from bpn_analysis.io.bids_export import (
+from bemobil_mne.io.bids_export import (
     batch_export_to_bids,
     export_to_bids,
     make_bids_dataset_description,

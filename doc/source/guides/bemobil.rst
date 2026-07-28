@@ -4,7 +4,7 @@ Comparison with the BeMoBIL pipeline
 =====================================
 
 The `BeMoBIL pipeline <https://github.com/BeMoBIL/bemobil-pipeline>`_ (Klug et al., 2022)
-is a widely-used MATLAB toolbox for automated MoBI data analysis.  BeMoBIL-Python is its
+is a widely-used MATLAB toolbox for automated MoBI data analysis.  BeMoBIL-MNE is its
 Python/MNE counterpart, designed to produce equivalent results while integrating with the
 broader scientific Python ecosystem.
 
@@ -22,7 +22,7 @@ Overview
 
    * -
      - MATLAB BeMoBIL pipeline
-     - BeMoBIL-Python
+     - BeMoBIL-MNE
    * - Language
      - MATLAB
      - Python
@@ -68,7 +68,7 @@ The following preprocessing parameters are set to match the original MATLAB impl
 
    * - Setting
      - MATLAB BeMoBIL
-     - BeMoBIL-Python
+     - BeMoBIL-MNE
    * - Resample for ICA
      - 250 Hz
      - ``downsample_ica=250.0``
@@ -104,21 +104,21 @@ Intentional differences
 
 **Bad channel detection method**
    The original MATLAB implementation uses ``clean_rawdata`` (a variant of the ASR correlation algorithm) with
-   ``chancorr_crit=0.8`` and ``chan_max_broken_time=0.3``.  BeMoBIL-Python uses a combination
+   ``chancorr_crit=0.8`` and ``chan_max_broken_time=0.3``.  BeMoBIL-MNE uses a combination
    of PyPREP and FASTER, which are well-validated standalone Python implementations.
    Both approaches flag channels that decorrelate from their neighbours; the underlying
    principle is the same.
 
 **ASR**
    The original MATLAB implementation does not apply ASR - it relies on AMICA's built-in autoreject
-   (``AMICA_autoreject=1``, sigma threshold 3).  BeMoBIL-Python also disables ASR by default
+   (``AMICA_autoreject=1``, sigma threshold 3).  BeMoBIL-MNE also disables ASR by default
    (``asr=False``) for the same reason: AMICA's internal rejection is sufficient for clean
    ICA decompositions.  ASR is available as an opt-in (``asr=True`` or ``asr={"cutoff": 20}``)
    for pipelines that do not use AMICA.
 
 **Final high-pass filter**
    The original MATLAB implementation applies a 0.2 Hz high-pass after ICA (``final_filter_lower_edge=0.2``).
-   BeMoBIL-Python removed this step (``final_filter_bands`` was dropped) because the
+   BeMoBIL-MNE removed this step (``final_filter_bands`` was dropped) because the
    main bandpass filter (``filter_bands=(0.1, 100.0)`` by default) already removes
    sub-0.1 Hz drift, and the final filter adds an implicit dependency on analysis choices
    that belong downstream.  Add it back explicitly if needed:
@@ -128,7 +128,7 @@ Intentional differences
       raw_clean.filter(l_freq=0.2, h_freq=None)
 
 **Output format**
-   The original MATLAB implementation saves ``.set`` / ``.fdt`` (EEGLAB) files.  BeMoBIL-Python saves ``.fif.gz``
+   The original MATLAB implementation saves ``.set`` / ``.fdt`` (EEGLAB) files.  BeMoBIL-MNE saves ``.fif.gz``
    (MNE native), which supports lossless compression and carries full metadata including
    the provenance descriptor.
 
@@ -137,12 +137,12 @@ Intentional differences
 Minimal example
 ---------------
 
-The following script replicates the core BeMoBIL EEG preprocessing steps using BeMoBIL-Python.
+The following script replicates the core BeMoBIL EEG preprocessing steps using BeMoBIL-MNE.
 
 .. code-block:: python
 
-   from bemobil_python.io import XDFLoader
-   from bemobil_python.preproc import EEGPreprocessor
+   from bemobil_mne.io import XDFLoader
+   from bemobil_mne.preproc import EEGPreprocessor
 
    # --- Equivalent to bemobil_process_all_EEG_preprocessing ---
 

@@ -3,7 +3,7 @@ build-backend = "hatchling.build"
 requires = ["hatch-vcs", "hatchling"]
 
 [project]
-authors = [{name = "The BPN team"}]
+authors = [{name = "The BeMoBIL-MNE team"}]
 classifiers = [
   "Intended Audience :: Science/Research",
   "Operating System :: MacOS",
@@ -36,7 +36,7 @@ dependencies = [
   "python-picard",
   "scikit-learn",
 ]
-description = "data analysis scripts"
+description = "MoBI data loading, preprocessing, and visualization built on MNE-Python"
 dynamic = ["version"]
 keywords = [
   "eeg",
@@ -48,20 +48,27 @@ license = {text = "Roy Eric Random. All rights reserved."}
 maintainers = [
   {email = "eric.wieske@gmail.com", name = "Roy Eric Wieske"},
 ]
-name = "BPN-analysis"
+name = "BeMoBIL-MNE"
 readme = {content-type = "text/markdown", file = "README.md"}
 requires-python = ">=3.10"
 
 [project.optional-dependencies]
 # Dependencies for developer installations
-dev = ["build", "BPN-analysis[test]", "ipykernel", "ipython", "pre-commit", "ruff", "twine"]
+dev = ["build", "BeMoBIL-MNE[test]", "ipykernel", "ipython", "pre-commit", "ruff", "twine"]
+# Dependencies for building the documentation
+docs = [
+    "sphinx>=7",
+    "pydata-sphinx-theme>=0.15",
+    "numpydoc",
+    "sphinx-copybutton",
+]
 # Dependencies for running the test infrastructure
-test = ["BPN-analysis", "pytest", "pytest-cov", "pytest-sugar", "pytest-xdist"]
+test = ["BeMoBIL-MNE", "pytest", "pytest-cov", "pytest-sugar", "pytest-xdist"]
 
 [project.urls]
-"Bug Tracker" = "https://github.com/Randomidous/BPN-analysis/issues/"
-"Documentation" = "https://github.com/Randomidous/BPN-analysis/"
-"Source Code" = "https://github.com/Randomidous/BPN-analysis/"
+"Bug Tracker" = "https://github.com/Randomidous/BeMoBIL-MNE/issues/"
+"Documentation" = "https://randomidous.github.io/data-analysis/"
+"Source Code" = "https://github.com/Randomidous/BeMoBIL-MNE/"
 
 [tool.hatch.build]
 exclude = [
@@ -70,7 +77,7 @@ exclude = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["bpn_analysis"]
+packages = ["bemobil_mne"]
 
 [tool.hatch.metadata]
 allow-direct-references = true  # allow specifying URLs in our dependencies
@@ -80,7 +87,7 @@ raw-options = {version_scheme = "release-branch-semver"}
 source = "vcs"
 
 [tool.pytest.ini_options]
-addopts = """--cov=bpn_analysis --cov-report=html --cov-config=pyproject.toml
+addopts = """--cov=bemobil_mne --cov-report=html --cov-config=pyproject.toml
     --durations=20 -ra --junit-xml=junit-results.xml --tb=short
     --ignore=doc --ignore=examples --ignore=mne_bids/tests/data -n auto"""
 filterwarnings = [
@@ -90,8 +97,8 @@ filterwarnings = [
 testpaths = ["tests"]
 
 [tool.coverage.run]
-omit = ["*tests*", "bpn_analysis/analysis/*", "bpn_analysis/examples/*"]
-source = ["bpn_analysis"]
+omit = ["*tests*", "bemobil_mne/examples/*"]
+source = ["bemobil_mne"]
 # Required for pytest-xdist: each worker writes its own .coverage.* file
 # which coverage combine merges at the end.
 parallel = true

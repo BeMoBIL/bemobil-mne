@@ -9,12 +9,12 @@ sys.path.insert(0, str(Path(__file__).parents[2]))
 
 # -- Project information -----------------------------------------------------
 
-project = "BeMoBIL-Python"
+project = "BeMoBIL-MNE"
 copyright = "2026, Roy Eric Wieske"
 author = "Roy Eric Wieske"
 
 try:
-    from bemobil_python import __version__
+    from bemobil_mne import __version__
 
     release = __version__
 except Exception:

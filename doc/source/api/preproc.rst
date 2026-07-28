@@ -13,13 +13,13 @@ standalone.
 EEG pipeline
 ------------
 
-:class:`~bemobil_python.preproc.EEGPreprocessor` orchestrates the full pipeline:
+:class:`~bemobil_mne.preproc.EEGPreprocessor` orchestrates the full pipeline:
 ZapLine → bad-channel detection → bandpass filter → ASR → ICA/AMICA →
 ICLabel classification → dipole fitting → average re-reference → bad-channel
 interpolation.  All steps are recorded in a provenance descriptor stored on
 the :class:`mne.io.Raw` object.
 
-.. currentmodule:: bemobil_python.preproc
+.. currentmodule:: bemobil_mne.preproc
 
 .. autosummary::
    :toctree: generated/
@@ -92,8 +92,8 @@ Motion capture
 --------------
 
 Rigid-body kinematics from XDF motion streams.  Works on the motion data
-returned by :class:`~bemobil_python.io.XDFLoader` in
-:attr:`~bemobil_python.io.MultimodalRecording.motion`.
+returned by :class:`~bemobil_mne.io.XDFLoader` in
+:attr:`~bemobil_mne.io.MultimodalRecording.motion`.
 
 .. autosummary::
    :toctree: generated/

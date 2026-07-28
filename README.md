@@ -1,11 +1,11 @@
-# data-analysis
+# bemobil-mne
 
-Python repository for EEG and multimodal analysis utilities at BPN (Berlin Mobile Brain/Body Imaging Lab).
+MoBI data loading, preprocessing, and visualization built on MNE-Python.
 
 ## Structure
 
 ```md
-bpn_analysis/
+bemobil_mne/
 ├── io/                          # Data I/O
 │   ├── xdf.py                   # XDFLoader: multimodal XDF loading, stream alignment
 │   ├── alignment.py             # align_stream_to_timestamps (timestamp-aware interpolation)
@@ -19,9 +19,6 @@ bpn_analysis/
 ├── viz/                         # Visualization
 │   ├── plotting.py              # ERP, PSD, and component plots
 │   └── utils.py                 # Plot helpers
-├── analysis/                    # Project-specific analysis folders with scripts
-│   ├── project-A/
-│   └── project-B/
 ├── examples/                    # Runnable example scripts
 │   ├── preprocess_and_plot.py   # Full EEG preprocessing + visualization walkthrough
 │   ├── xdf_loading.py           # XDF multimodal loading
@@ -51,8 +48,8 @@ pip install -e .
 ```
 
 ```python
-from bpn_analysis.io import XDFLoader
-from bpn_analysis.preproc import EEGPreprocessor, find_rigid_bodies
+from bemobil_mne.io import XDFLoader
+from bemobil_mne.preproc import EEGPreprocessor, find_rigid_bodies
 
 # Load a multimodal XDF recording
 loader = XDFLoader(montage="standard_1020")
@@ -60,7 +57,7 @@ recording = loader.load("sub-01_task-walk_run-01.xdf")
 raw = recording.raw
 ```
 
-See `bpn_analysis/examples/` for complete worked examples:
+See `examples/` for complete worked examples:
 
 | Feature | Example script |
 | --------- | --------------- |
