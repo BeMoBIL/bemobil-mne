@@ -135,7 +135,7 @@ def init_descriptor(source=None, pipeline=""):
         ``versions``, and an empty ``steps`` list.
     """
     try:
-        bpn_ver = version("bpn-analysis")
+        bpn_ver = version("bemobil-mne")
     except PackageNotFoundError:
         bpn_ver = "unknown"
 
@@ -350,7 +350,7 @@ def build_sys_info(source_data=None):
 
     pkg_lines = ["Installed packages", "------------------", ""]
     for pkg in (
-        "bpn-analysis",
+        "bemobil-mne",
         "mne",
         "mne-icalabel",
         "mne-faster",
