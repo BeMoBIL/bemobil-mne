@@ -75,7 +75,7 @@ This is a private repository for BPN lab members. Contributions are made via fea
 1. Clone the repo:
 
     ```bash
-    git clone https://github.com/Randomidous/bemobil-mne.git
+    git clone https://github.com/BeMoBIL/bemobil-mne.git
     cd bemobil-mne
     ```
 

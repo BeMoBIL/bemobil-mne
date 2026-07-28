@@ -30,7 +30,7 @@ Installation
 
 .. code-block:: bash
 
-   git clone https://github.com/Randomidous/bemobil-mne.git
+   git clone https://github.com/BeMoBIL/bemobil-mne.git
    cd bemobil-mne
    pip install -e .
 
