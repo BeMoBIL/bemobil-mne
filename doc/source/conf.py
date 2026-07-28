@@ -9,12 +9,13 @@ sys.path.insert(0, str(Path(__file__).parents[2]))
 
 # -- Project information -----------------------------------------------------
 
-project = "BPN Analysis"
+project = "BeMoBIL-MNE"
 copyright = "2026, Roy Eric Wieske"
 author = "Roy Eric Wieske"
 
 try:
-    from bpn_analysis import __version__
+    from bemobil_mne import __version__
+
     release = __version__
 except Exception:
     release = ""
@@ -22,12 +23,12 @@ except Exception:
 # -- General configuration ---------------------------------------------------
 
 extensions = [
-    "sphinx.ext.autodoc",       # pulls docstrings from the source
-    "sphinx.ext.autosummary",   # generates summary tables
-    "sphinx.ext.intersphinx",   # cross-links to MNE, NumPy, etc.
-    "sphinx.ext.viewcode",      # adds [source] links on every object page
-    "numpydoc",                 # renders NumPy-style Parameters/Returns sections
-    "sphinx_copybutton",        # copy button on code blocks
+    "sphinx.ext.autodoc",  # pulls docstrings from the source
+    "sphinx.ext.autosummary",  # generates summary tables
+    "sphinx.ext.intersphinx",  # cross-links to MNE, NumPy, etc.
+    "sphinx.ext.viewcode",  # adds [source] links on every object page
+    "numpydoc",  # renders NumPy-style Parameters/Returns sections
+    "sphinx_copybutton",  # copy button on code blocks
 ]
 
 templates_path = ["_templates"]
@@ -41,13 +42,14 @@ autodoc_default_options = {
     "show-inheritance": True,
     "inherited-members": False,
 }
-autodoc_typehints = "description"   # put type hints in the description, not signature
-autosummary_generate = True         # auto-create stub .rst files
+autodoc_typehints = "description"  # put type hints in the description, not signature
+autosummary_generate = True  # auto-create stub .rst files
+autosummary_generate_overwrite = True  # always overwrite stubs, even if they exist
 
 # -- numpydoc ----------------------------------------------------------------
 
-numpydoc_show_class_members = False     # autosummary handles class members
-numpydoc_xref_param_type = True         # turn type names into cross-refs
+numpydoc_show_class_members = False  # autosummary handles class members
+numpydoc_xref_param_type = True  # turn type names into cross-refs
 
 # -- intersphinx -------------------------------------------------------------
 # Lets :class:`mne.io.Raw`, :func:`numpy.array`, etc. resolve to live links.
@@ -63,7 +65,14 @@ intersphinx_mapping = {
 
 html_theme = "pydata_sphinx_theme"
 html_static_path = ["_static"]
+html_baseurl = "https://randomidous.github.io/data-analysis/"
+
 html_theme_options = {
     "github_url": "https://github.com/Randomidous/data-analysis",
     "show_toc_level": 2,
+    "navigation_with_keys": True,
+    "navbar_end": ["navbar-icon-links", "theme-switcher"],
+    "secondary_sidebar_items": ["page-toc", "sourcelink"],
+    "footer_start": ["copyright"],
+    "footer_end": [],
 }

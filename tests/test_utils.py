@@ -1,4 +1,4 @@
-"""Tests for bpn_analysis.preproc.utils."""
+"""Tests for bemobil_mne.preproc.utils."""
 
 # %% Imports
 
@@ -9,7 +9,7 @@ import mne
 import numpy as np
 import pytest
 
-from bpn_analysis.preproc.utils import (
+from bemobil_mne.preproc.utils import (
     StepTimer,
     append_desc,
     build_sys_info,
