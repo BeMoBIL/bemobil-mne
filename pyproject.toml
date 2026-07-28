@@ -34,6 +34,7 @@ dependencies = [
   "pybv",
   "pyprep",
   "python-picard",
+  "pyxdf",
   "scikit-learn",
 ]
 description = "MoBI data loading, preprocessing, and visualization built on MNE-Python"
