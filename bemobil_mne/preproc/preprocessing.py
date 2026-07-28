@@ -501,6 +501,7 @@ class EEGPreprocessor:
         fname_out: str | Path | None = None,
         *,
         overwrite: bool = False,
+        tier2: dict | None = None,
     ) -> tuple:
         """Run the preprocessing pipeline on an already-loaded *raw* object.
 
@@ -514,6 +515,12 @@ class EEGPreprocessor:
             Output stem for saving derivatives.  Pass ``None`` to skip saving.
         overwrite : bool
             Overwrite existing output files.
+        tier2 : dict | None
+            Tier-2 streams from :class:`~bemobil_mne.io.MultimodalRecording`
+            (e.g. ``rec.tier2``), kept at native rate and not merged into
+            *raw*.  When provided and ``make_report=True``, each stream is
+            plotted in full (decimated envelope, with drop-outs shaded) in
+            its own report section.  ``None`` (default) skips this section.
 
         Returns
         -------
@@ -789,6 +796,7 @@ class EEGPreprocessor:
                 event_id=self.event_id,
                 thresh=self.thresh,
                 step_timings=timer.timings,
+                tier2=tier2,
             )
 
         # --- Save (optional) ---
