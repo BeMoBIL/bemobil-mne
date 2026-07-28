@@ -2,7 +2,6 @@
 
 # %% Imports
 
-import json
 import logging
 
 import mne
