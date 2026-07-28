@@ -28,6 +28,22 @@ the :class:`mne.io.Raw` object.
 
 ----
 
+Reporting
+---------
+
+Builds an :class:`mne.Report` summarising a single :class:`EEGPreprocessor` run
+(bad channels, ICA, dipoles, and full-length stream traces for drop-out
+inspection).  Called automatically by :meth:`EEGPreprocessor.run_raw` when
+``make_report=True`` (the default); can also be called directly on saved
+pipeline outputs.
+
+.. autosummary::
+   :toctree: generated/
+
+   make_report
+
+----
+
 Bad channel detection
 ---------------------
 
