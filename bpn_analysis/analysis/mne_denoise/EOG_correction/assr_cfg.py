@@ -61,8 +61,8 @@ LOADER = XDFLoader(
 
 PREPROCESSOR = EEGPreprocessor(
     LOADER,
-    rng_seed=1836791205,
-    asr_cutoff=20,
+    asr={"cutoff": 20},
     exclude_labels=["muscle artifact", "line noise", "channel noise"],
     include_labels=None,
+    rng_seed=1836791205,
 )

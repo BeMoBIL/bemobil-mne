@@ -115,11 +115,11 @@ def test_eegpreprocessor_instantiation():
 
 
 def test_eegpreprocessor_custom_params():
-    """Accept custom filter_bands, zapline_freqs, and zapline_method."""
+    """Accept custom filter_bands, line_noise_freq, and zapline_method."""
     proc = EEGPreprocessor(
         loader=None,
         filter_bands=(1.0, 80.0),
-        zapline_freqs=[50.0],
+        line_noise_freq=50.0,
         zapline_method="dss_line",
         fit_ica=False,
     )
@@ -152,7 +152,7 @@ def test_eegpreprocessor_full_run_no_dipoles(tmp_path, sample_raw):
     proc = EEGPreprocessor(
         loader=None,
         filter_bands=(1.0, 40.0),
-        zapline_freqs=[60.0],  # 60 Hz: below Nyquist of EEGBCI ~160 Hz
+        line_noise_freq=60.0,
         zapline_method="dss_line",
         fit_ica=True,
         ica_method="picard",

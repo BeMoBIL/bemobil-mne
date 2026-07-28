@@ -42,8 +42,8 @@ def get_bad_chs(
     pyprep_kwargs=None,
     notch_lines=np.arange(50, 151, 50),
     notch_width=1.0,
-    line_noise_crit=4.0,
-    flatline_crit=5.0,
+    line_noise_crit=None,
+    flatline_crit=None,
 ):
     """Detect bad EEG channels using PyPREP, FASTER, flatline, and line noise.
 
@@ -74,11 +74,15 @@ def get_bad_chs(
         Z-score threshold for the per-channel line noise criterion.
         A channel is flagged as bad when its line-noise-to-broadband ratio
         exceeds this many standard deviations above the mean across channels.
-        Pass ``None`` to skip this criterion.
+        ``None`` (default) disables this criterion - recommended when ZapLine
+        has already run, as residual line noise is negligible and the criterion
+        may produce false rejections.
     flatline_crit : float | None
         Maximum allowed duration (seconds) of a flatline segment.  Channels
         that are flat for longer than this threshold are flagged as bad via
-        PyPREP's ``find_bad_by_nan_flat``.  Pass ``None`` to disable.
+        PyPREP's ``find_bad_by_nan_flat``.  ``None`` (default) disables this -
+        recommended for MoBI data where transient electrode lifts produce brief
+        flatlines that do not indicate a broken channel.
 
     Returns
     -------
@@ -174,44 +178,153 @@ def get_bad_chs(
 # %% Classes
 
 
+def _expand_line_noise_freq(line_noise_freq, sfreq):
+    """Return harmonics of *line_noise_freq* up to (but not exceeding) Nyquist.
+
+    Parameters
+    ----------
+    line_noise_freq : float | ``"europe"`` | ``"usa"``
+        Fundamental line-noise frequency in Hz, or a regional shortcut.
+        ``"europe"`` → 50.0 Hz, ``"usa"`` → 60.0 Hz.
+    sfreq : float
+        Sampling frequency of the recording in Hz.
+
+    Returns
+    -------
+    harmonics : numpy.ndarray
+        1-D array of harmonic frequencies ``[f, 2f, 3f, ...]`` with all
+        values strictly below Nyquist (``sfreq / 2``).
+    """
+    if isinstance(line_noise_freq, str):
+        if line_noise_freq == "europe":
+            base = 50.0
+        elif line_noise_freq == "usa":
+            base = 60.0
+        else:
+            raise ValueError(
+                f"Unknown line_noise_freq preset: {line_noise_freq!r}. "
+                "Use 'europe', 'usa', or a float (e.g. 50.0)."
+            )
+    else:
+        base = float(line_noise_freq)
+    nyquist = sfreq / 2
+    n_harmonics = int(nyquist / base)
+    return base * np.arange(1, n_harmonics + 1)
+
+
 class EEGPreprocessor:
     """EEG preprocessing pipeline: filter → bad channels → ASR → ICA → save.
 
     Mirrors the ``run_preprocessing`` API from ``standard_scripts`` while
     following the ``bpn_analysis`` code conventions.
 
+    Parameters are listed in pipeline order.
+
     Parameters
     ----------
     loader : XDFLoader | None
         Configured loader used by :meth:`run` to read raw files.
         Not required when calling :meth:`run_raw` directly.
+    channel_types : dict | None
+        Channel name → MNE type mapping applied right after loading (only
+        used by :meth:`run`).
+    rename_channels : dict | str | None
+        Channel renaming applied at the very start of :meth:`run_raw`.
+
+        - ``dict``: explicit ``{old_name: new_name}`` mapping.
+        - ``str``: strip this prefix from every channel name that starts
+          with it (e.g. ``"BrainVision RDA_"``).
+        - ``None`` (default): no renaming.
+    pre_hook : callable | None
+        Arbitrary transformation applied to the raw object **after** channel
+        renaming and **before** any signal processing.
+
+        The callable receives the ``mne.io.Raw`` object as its only argument
+        and must return one of:
+
+        - the modified ``raw`` object, or
+        - a ``(raw, description)`` tuple, where *description* is a short
+          string (≤ 120 characters) describing what the hook did.  The
+          description is appended to the provenance metadata stored on the
+          raw object and saved with the pipeline outputs.
+
+        Use ``pre_hook`` for one-off operations that do not belong in the
+        general pipeline but must happen before filtering, such as cropping
+        the recording, injecting custom annotations, correcting a known
+        hardware artefact, or converting units.  The hook runs before ZapLine,
+        bad-channel detection, and all subsequent steps, so any changes it
+        makes are seen by the entire pipeline.
+
+        Example::
+
+            def my_hook(raw):
+                raw.crop(tmin=5.0)          # drop the first 5 s
+                return raw, "cropped first 5 s"
+
+            preprocessor = EEGPreprocessor(loader, pre_hook=my_hook)
+    line_noise_freq : float | ``"europe"`` | ``"usa"``
+        Fundamental line-noise frequency in Hz.  Harmonics are computed
+        automatically up to (but not exceeding) the Nyquist frequency of the
+        recording.  Accepted values:
+
+        - ``float``: explicit fundamental (e.g. ``50.0`` or ``60.0``).
+        - ``"europe"``: shortcut for 50 Hz (default).
+        - ``"usa"``: shortcut for 60 Hz.
+
+        The resulting harmonic array is used both by the ZapLine spectral
+        cleaning step (when *zapline_method* is not ``None``) and by
+        :func:`get_bad_chs` for notch-filtered bad-channel detection.
+    zapline_method : str | None
+        DSS-based spectral cleaning algorithm applied before bandpass
+        filtering.  ``None`` skips ZapLine entirely.  Default is
+        ``"adaptive"`` (matching BeMoBIL).  One of:
+
+        ``"adaptive"``
+            ZapLine-plus (mne-denoise) with adaptive frequency detection.
+        ``"zapline"``
+            Standard ZapLine (mne-denoise), fixed-frequency.
+        ``"dss_line"``
+            Single-pass DSS (meegkit).
+        ``"dss_line_iter"``
+            Iterative DSS (meegkit).
+    get_bad_chs_kwargs : dict | None
+        Extra keyword arguments forwarded to :func:`get_bad_chs`.  Supported
+        keys (all optional):
+
+        - ``"pyprep_kwargs"`` (*dict*): passed to PyPREP's
+          :class:`~pyprep.NoisyChannels`; ``random_state`` is always
+          overwritten with *rng_seed*.
+        - ``"notch_width"`` (*float*, default ``1.0``): width of the notch
+          filter used during bad-channel detection.
+        - ``"line_noise_crit"`` (*float | None*, default ``None``): z-score
+          threshold for the per-channel line-noise criterion; ``None``
+          (default) disables this check - recommended when ZapLine has run.
+        - ``"flatline_crit"`` (*float | None*, default ``None``): maximum
+          flatline duration in seconds before a channel is flagged bad;
+          ``None`` (default) disables this - recommended for MoBI data.
+    annotate_break_kwargs : dict | None
+        Forwarded to :func:`mne.preprocessing.annotate_break`.
     filter_bands : tuple of float
         ``(l_freq, h_freq)`` for the main bandpass filter applied to
         ``raw_minimal``.
+    subset_chs : list of str | None
+        Channels for the ``raw_subset`` output (minimally processed, without
+        average reference).  Defaults to some central and frontal channels when
+        ``None`` but produces ``None`` if none are found in the data.
+    asr : bool | dict
+        Controls Artifact Subspace Reconstruction (ASR).
+
+        - ``False`` (default): skip ASR; ``raw_asr`` is a copy of
+          ``raw_minimal``.
+        - ``True``: run ASR with the default parameters of
+          :func:`~bpn_analysis.preproc.utils.compute_asr`.
+        - ``dict``: run ASR and pass the dict as keyword arguments to
+          :func:`~bpn_analysis.preproc.utils.compute_asr` (e.g.
+          ``{"cutoff": 10, "estimator": "lwf"}``).
     filter_bands_ica : tuple of float
         ``(l_freq, h_freq)`` for the ICA-specific bandpass filter.
-    notch_freqs : array-like | ``"europe"`` | ``"usa"``
-        Line-noise frequencies to notch out. Strings ``"europe"`` and
-        ``"usa"`` expand to 50/100/150 Hz and 60/120/180 Hz respectively.
     downsample_ica : float | None
         Target sampling rate for ICA fitting.  ``None`` skips downsampling.
-    thresh : float
-        ICLabel probability threshold above which a component is excluded.
-    asr_cutoff : float | False
-        ASR cutoff parameter.  Pass ``False`` to skip ASR entirely.
-    rng_seed : int | None
-        Random seed for ICA and PyPREP.
-    annotate_break_kwargs : dict | None
-        Forwarded to :func:`mne.preprocessing.annotate_break`.
-    exclude_labels : list of str | None
-        ICLabel categories to exclude.  Mutually exclusive with
-        *include_labels*.
-    include_labels : set of str | None
-        ICLabel categories to keep; all others are excluded.
-        Defaults to ``{"brain", "other"}``.  Mutually exclusive with
-        *exclude_labels*.
-    channel_types : dict | None
-        Channel name → MNE type mapping applied right after loading.
     ica_method : str
         ICA algorithm.  ``"amica"`` (default) uses AMICA via
         ``amica-python`` and converts to MNE ICA; falls back to picard if the
@@ -220,6 +333,22 @@ class EEGPreprocessor:
         ``"picard"``, ``"fastica"``).  Ignored when ``fit_ica=False``.
     fit_ica : bool
         If ``False``, skip ICA entirely (``raw_clean`` equals ``raw_asr``).
+    thresh : float
+        ICLabel decision threshold.  Set to ``-1`` (default, matching
+        BeMoBIL) to use **popularity-vote** mode: each IC is assigned to
+        whichever class has the highest predicted probability; it is excluded
+        if that class is not in *include_labels* (or is in *exclude_labels*).
+        Any value in ``[0, 1]`` switches to **probability-threshold** mode:
+        an IC is excluded only when its artifact-class probability meets or
+        exceeds this value.
+    exclude_labels : list of str | None
+        ICLabel categories to exclude.  Mutually exclusive with
+        *include_labels*.
+    include_labels : set of str | None
+        ICLabel categories to keep; all others are excluded.  Defaults to
+        all classes except ``"eye blink"`` (matching BeMoBIL's
+        ``iclabel_classes = [1 2 4 5 6 7]``).  Mutually exclusive with
+        *exclude_labels*.
     fit_dipoles : bool
         If ``True``, fit a dipole to each ICA component topography using the
         fsaverage BEM.  Requires a montage with digitisation.
@@ -227,53 +356,6 @@ class EEGPreprocessor:
         Head→MRI transform for dipole fitting. ``None`` and ``"fsaverage"``
         use the MNE built-in template; ``"fit"`` runs automatic coregistration.
         Ignored when ``fit_dipoles=False``.
-    subset_chs : list of str | None
-        Channels for the ``raw_subset`` output (minimally processed, without
-        average reference).  Defaults to the some central and frontal channels when
-        ``None`` but produces ``None`` if none are found in the data.
-    pre_hook : callable | None
-        Called on the raw object before any processing.  Must accept a raw
-        object and return either a raw object or a ``(raw, description)`` tuple
-        where *description* is a string recorded in the provenance.
-    verbose : bool | str | int
-        MNE verbosity level during processing.
-    event_id : dict | None
-        Event map recorded in provenance metadata (no effect on processing).
-    pyprep_kwargs : dict | None
-        Extra keyword arguments forwarded to PyPREP's
-        :class:`~pyprep.NoisyChannels`.  The ``random_state`` key is
-        always overwritten with *rng_seed*.
-    line_noise_crit : float | None
-        Z-score threshold for the per-channel line-noise criterion in bad
-        channel detection.  ``None`` disables this criterion.
-    zapline_freqs : array-like | ``"europe"`` | ``"usa"`` | None
-        If not ``None``, applies ZapLine (DSS-based) spectral cleaning to the
-        main raw recording before the bandpass filter.  Accepts the same
-        string shortcuts as *notch_freqs*.  Pass ``None`` together with
-        ``zapline_method="adaptive"`` to enable auto-detection.
-    zapline_method : str
-        Algorithm used by :func:`compute_zapline`.  One of:
-
-        ``"adaptive"`` (default)
-            ZapLine-plus (mne-denoise) with adaptive frequency detection.
-        ``"zapline"``
-            Standard ZapLine (mne-denoise), fixed-frequency.
-        ``"dss_line"``
-            Single-pass DSS (meegkit).
-        ``"dss_line_iter"``
-            Iterative DSS (meegkit).
-    rename_channels : dict | str | None
-        Channel renaming applied immediately before any processing.
-
-        - ``dict``: explicit ``{old_name: new_name}`` mapping.
-        - ``str``: strip this prefix from every channel name that starts
-          with it (e.g. ``"BrainVision RDA_"``).
-        - ``None`` (default): no renaming.
-    final_filter_bands : tuple of float | None
-        If not ``None``, apply a final bandpass filter (MNE ``raw.filter``)
-        to ``raw_clean`` after ICA cleaning, average re-referencing, and bad
-        channel interpolation.  Useful for removing very slow drifts before
-        further analysis (e.g. ``(0.5, 40.0)``).
     rv_thresh : float | None
         Residual-variance threshold for dipole fitting.  Components whose
         best-fitting dipole has RV >= *rv_thresh* are set to ``None`` in the
@@ -282,49 +364,61 @@ class EEGPreprocessor:
     remove_outside_head : bool
         If ``True``, components whose dipole falls outside the head model
         (position norm > 0.13 m) are set to ``None`` in the output lists.
+    rng_seed : int | None
+        Random seed for ICA and PyPREP.
+    event_id : dict | None
+        Event map recorded in provenance metadata (no effect on processing).
     skip_if_exists : bool
         If ``True`` *and* ``overwrite=False``, skip the entire computation
         when the primary output file ``{fname_out}_clean.fif.gz`` already
         exists and return the previously saved results instead.
     make_report : bool
-        If ``True`` and *fname_out* is provided, generate an
+        If ``True`` (default) and *fname_out* is provided, generate an
         :class:`mne.Report` summarising the preprocessing outputs and save it
         alongside the other derivatives as ``{fname_out}_report.html``.
+    verbose : bool | str | int
+        MNE verbosity level during processing.
     """
 
     def __init__(
         self,
         loader,
         *,
-        filter_bands: tuple[float | None, float | None] = (0.1, 100.0),
-        filter_bands_ica: tuple[float | None, float | None] = (1.0, 100.0),
-        notch_freqs: tuple[float, ...] | str = (50, 100, 150),
-        downsample_ica: float | None = 250.0,
-        thresh: float = 0.7,
-        asr_cutoff: float | bool = 20.0,
-        rng_seed: int | None = None,
-        annotate_break_kwargs: dict | None = None,
-        exclude_labels: list | None = None,
-        include_labels: set | None = frozenset({"brain", "other"}),
         channel_types: dict | None = None,
+        rename_channels=None,
+        pre_hook: object = None,
+        line_noise_freq: float | str = "europe",
+        zapline_method: str | None = "adaptive",
+        get_bad_chs_kwargs: dict | None = None,
+        annotate_break_kwargs: dict | None = None,
+        filter_bands: tuple[float | None, float | None] = (0.1, 100.0),
+        subset_chs: list | None = None,
+        asr: bool | dict = False,
+        filter_bands_ica: tuple[float | None, float | None] = (1.75, None),
+        downsample_ica: float | None = 250.0,
         ica_method: str = "amica",
         fit_ica: bool = True,
+        thresh: float = -1,
+        exclude_labels: list | None = None,
+        include_labels: set | None = frozenset(
+            {
+                "brain",
+                "muscle artifact",
+                "heart beat",
+                "line noise",
+                "channel noise",
+                "other",
+            }
+        ),
         fit_dipoles: bool = False,
         trans: object = None,
-        subset_chs: list | None = None,
-        pre_hook: object = None,
-        verbose: bool | str | int = True,
-        event_id: dict | None = None,
-        pyprep_kwargs: dict | None = None,
-        line_noise_crit: float | None = 4.0,
-        zapline_freqs=None,
-        zapline_method: str = "adaptive",
-        rename_channels=None,
-        final_filter_bands: tuple[float | None, float | None] | None = None,
         rv_thresh: float | None = None,
         remove_outside_head: bool = False,
+        rng_seed: int | None = None,
+        event_id: dict | None = None,
         skip_if_exists: bool = False,
-        make_report: bool = False,
+        make_report: bool = True,
+        verbose: bool | str | int = True,
     ):
         if not fit_ica and fit_dipoles:
             raise ValueError(
@@ -332,48 +426,43 @@ class EEGPreprocessor:
                 "Set fit_ica=True or fit_dipoles=False."
             )
 
-        # Expand notch string shortcuts so every internal caller sees a tuple
-        if isinstance(notch_freqs, str):
-            if notch_freqs == "europe":
-                notch_freqs = (50, 100, 150)
-            elif notch_freqs == "usa":
-                notch_freqs = (60, 120, 180)
-            else:
-                raise ValueError(
-                    f"Unknown notch_freqs preset: {notch_freqs!r}. "
-                    "Use 'europe', 'usa', or an explicit tuple."
-                )
+        # Validate line_noise_freq early so errors surface at construction time
+        if isinstance(line_noise_freq, str) and line_noise_freq not in (
+            "europe",
+            "usa",
+        ):
+            raise ValueError(
+                f"Unknown line_noise_freq preset: {line_noise_freq!r}. "
+                "Use 'europe', 'usa', or a float (e.g. 50.0)."
+            )
 
         self.loader = loader
-        self.filter_bands = filter_bands
-        self.filter_bands_ica = filter_bands_ica
-        self.notch_freqs = notch_freqs
-        self.downsample_ica = downsample_ica
-        self.thresh = thresh
-        self.asr_cutoff = asr_cutoff
-        self.rng_seed = rng_seed
-        self.annotate_break_kwargs = annotate_break_kwargs
-        self.exclude_labels = exclude_labels
-        self.include_labels = include_labels
         self.channel_types = channel_types
+        self.rename_channels = rename_channels
+        self.pre_hook = pre_hook
+        self.line_noise_freq = line_noise_freq
+        self.zapline_method = zapline_method
+        self.get_bad_chs_kwargs = get_bad_chs_kwargs or {}
+        self.annotate_break_kwargs = annotate_break_kwargs
+        self.filter_bands = filter_bands
+        self.subset_chs = subset_chs
+        self.asr = asr
+        self.filter_bands_ica = filter_bands_ica
+        self.downsample_ica = downsample_ica
         self.ica_method = ica_method
         self.fit_ica = fit_ica
+        self.thresh = thresh
+        self.exclude_labels = exclude_labels
+        self.include_labels = include_labels
         self.fit_dipoles = fit_dipoles
         self.trans = trans
-        self.subset_chs = subset_chs
-        self.pre_hook = pre_hook
-        self.verbose = verbose
-        self.event_id = event_id
-        self.pyprep_kwargs = pyprep_kwargs or {}
-        self.line_noise_crit = line_noise_crit
-        self.zapline_freqs = zapline_freqs
-        self.zapline_method = zapline_method
-        self.rename_channels = rename_channels
-        self.final_filter_bands = final_filter_bands
         self.rv_thresh = rv_thresh
         self.remove_outside_head = remove_outside_head
+        self.rng_seed = rng_seed
+        self.event_id = event_id
         self.skip_if_exists = skip_if_exists
         self.make_report = make_report
+        self.verbose = verbose
 
     # ------------------------------------------------------------------
     # Public entry points
@@ -491,33 +580,33 @@ class EEGPreprocessor:
                 append_desc(raw, name="pre_hook", description=pre_hook_description)
 
         # --- ZapLine spectral cleaning ---
-        if self.zapline_freqs is not None:
+        if self.zapline_method is not None:
             t0 = time.perf_counter()
+            zapline_freqs = _expand_line_noise_freq(
+                self.line_noise_freq, raw.info["sfreq"]
+            )
             raw = compute_zapline(
-                raw, noise_freqs=self.zapline_freqs, method=self.zapline_method
+                raw, noise_freqs=zapline_freqs, method=self.zapline_method
             )
             append_desc(
                 raw,
                 name="zapline",
                 method=self.zapline_method,
-                noise_freqs=list(
-                    np.atleast_1d(self.zapline_freqs).tolist()
-                    if not isinstance(self.zapline_freqs, str)
-                    else self.zapline_freqs
-                ),
+                noise_freqs=zapline_freqs.tolist(),
             )
             timer.log_step("zapline", time.perf_counter() - t0)
 
         # --- Bad channel detection ---
         t0 = time.perf_counter()
-        pyprep_kw = dict(self.pyprep_kwargs)
-        pyprep_kw["random_state"] = self.rng_seed
+        _bad_ch_kw = dict(self.get_bad_chs_kwargs)
+        _pyprep_kw = _bad_ch_kw.pop("pyprep_kwargs", {})
+        _pyprep_kw["random_state"] = self.rng_seed
+        _notch_lines = _expand_line_noise_freq(self.line_noise_freq, raw.info["sfreq"])
         bad_ch_dict = get_bad_chs(
             raw,
-            pyprep_kwargs=pyprep_kw,
-            notch_lines=np.asarray(self.notch_freqs),
-            notch_width=1.0,
-            line_noise_crit=self.line_noise_crit,
+            pyprep_kwargs=_pyprep_kw,
+            notch_lines=_notch_lines,
+            **_bad_ch_kw,
         )
         raw.info["bads"] = bad_ch_dict["all_bads"]
         append_desc(
@@ -578,11 +667,12 @@ class EEGPreprocessor:
 
         # --- ASR ---
         t0 = time.perf_counter()
-        if self.asr_cutoff is False:
+        if self.asr is False:
             raw_asr = raw_minimal.copy()
         else:
-            raw_asr = compute_asr(raw_minimal, cutoff=self.asr_cutoff)
-            append_desc(raw_asr, name="asr", cutoff=self.asr_cutoff)
+            _asr_kwargs = self.asr if isinstance(self.asr, dict) else {}
+            raw_asr = compute_asr(raw_minimal, **_asr_kwargs)
+            append_desc(raw_asr, name="asr", **_asr_kwargs)
         timer.log_step("asr", time.perf_counter() - t0)
 
         # --- ICA ---
@@ -591,10 +681,13 @@ class EEGPreprocessor:
         t0 = time.perf_counter()
 
         if self.fit_ica:
+            _ica_notch_freqs = _expand_line_noise_freq(
+                self.line_noise_freq, raw_asr.info["sfreq"]
+            )
             ica, ic_labels = compute_ica(
                 raw_asr,
                 filter_bands_ica=self.filter_bands_ica,
-                notch_freqs=self.notch_freqs,
+                notch_freqs=_ica_notch_freqs,
                 downsample_ica=self.downsample_ica,
                 thresh=self.thresh,
                 rng_seed=self.rng_seed,
@@ -675,20 +768,6 @@ class EEGPreprocessor:
             interpolated=bads_to_interp,
             eog_excluded=eog_chs,
         )
-
-        # --- Post-ICA final bandpass ---
-        if self.final_filter_bands is not None:
-            l_freq, h_freq = self.final_filter_bands
-            if l_freq is not None:
-                raw_clean.filter(l_freq=l_freq, h_freq=None)
-            if h_freq is not None:
-                raw_clean.filter(l_freq=None, h_freq=h_freq)
-            append_desc(
-                raw_clean,
-                name="final_filter",
-                l_freq=l_freq,
-                h_freq=h_freq,
-            )
 
         timer.log_step("rereference_interpolate", time.perf_counter() - t0)
 
@@ -784,7 +863,7 @@ class EEGPreprocessor:
             overwrite=overwrite,
             verbose="error",
         )
-        if self.asr_cutoff is not False:
+        if self.asr is not False:
             raw_asr.save(
                 stem.with_name(stem.name + "_asr.fif.gz"),
                 overwrite=overwrite,
