@@ -1271,7 +1271,7 @@ def plot_joint(inst_dict, ylim=None, ts_kwargs=None, topo_kwargs=None):
     inst_dict : dict
         Dictionary of epochs or evoked, grouped by condition such as:
         ``{"condition": mne.Epochs}`` or ``{"condition": mne.Evoked}``.
-    vlim : dict | None
+    ylim : dict | None
         Value limits {"eeg"": (ymin, ymax)} to use for all joint plots.
         If None, limits are inferred from the data (in µV).
     ts_kwargs : dict | None
@@ -1424,13 +1424,11 @@ def plot_butterfly(inst_dict, ylim=None, ts_kwargs=None):
     inst_dict : dict
         Dictionary of epochs or evoked, grouped by condition such as:
         ``{"condition": mne.Epochs}`` or ``{"condition": mne.Evoked}``.
-    vlim : dict | None
-        Value limits {"eeg"": (ymin, ymax)} to use for all joint plots.
+    ylim : dict | None
+        Value limits {"eeg"": (ymin, ymax)} to use for all butterfly plots.
         If None, limits are inferred from the data (in µV).
     ts_kwargs : dict | None
         Additional arguments for the time series plot. Default is None.
-    topo_kwargs : dict | None
-        Additional arguments for the topomap plot. Default is None.
 
     Returns
     -------
@@ -1439,7 +1437,7 @@ def plot_butterfly(inst_dict, ylim=None, ts_kwargs=None):
 
     See Also
     --------
-    mne.viz.plot_evoked_joint
+    mne.Evoked.plot
     """
     evokeds_dict = _check_input_type(inst_dict, domain="time")
     evokeds_dict_ave = {
@@ -1525,7 +1523,7 @@ def _check_input_type(inst_dict, domain):
         out_dict = {}
         # check type of inst_dict values
         if not isinstance(inst_dict, dict):
-            raise TypeError(f"{dict_warning} You provided: {type(entries)}")
+            raise TypeError(f"{dict_warning} You provided: {type(inst_dict)}")
 
         for key, entries in inst_dict.items():
             if isinstance(entries, list):
