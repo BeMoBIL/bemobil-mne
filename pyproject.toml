@@ -67,9 +67,9 @@ docs = [
 test = ["BeMoBIL-MNE", "pytest", "pytest-cov", "pytest-sugar", "pytest-xdist"]
 
 [project.urls]
-"Bug Tracker" = "https://github.com/Randomidous/BeMoBIL-MNE/issues/"
-"Documentation" = "https://randomidous.github.io/bemobil-mne/"
-"Source Code" = "https://github.com/Randomidous/BeMoBIL-MNE/"
+"Bug Tracker" = "https://github.com/BeMoBIL/bemobil-mne/issues/"
+"Documentation" = "https://bemobil.github.io/bemobil-mne/"
+"Source Code" = "https://github.com/BeMoBIL/bemobil-mne/"
 
 [tool.hatch.build]
 exclude = [

@@ -1,4 +1,4 @@
-# Configuration file for the Sphinx documentation builder.
+"""Configuration file for the Sphinx documentation builder."""
 # https://www.sphinx-doc.org/en/master/usage/configuration.html
 
 import sys
@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).parents[2]))
 # -- Project information -----------------------------------------------------
 
 project = "BeMoBIL-MNE"
-copyright = "2026, Roy Eric Wieske"
+copyright = "2026, BeMoBIL"
 author = "Roy Eric Wieske"
 
 try:
@@ -64,11 +64,10 @@ intersphinx_mapping = {
 # -- HTML output -------------------------------------------------------------
 
 html_theme = "pydata_sphinx_theme"
-html_static_path = ["_static"]
-html_baseurl = "https://randomidous.github.io/bemobil-mne/"
+html_baseurl = "https://bemobil.github.io/bemobil-mne/"
 
 html_theme_options = {
-    "github_url": "https://github.com/Randomidous/bemobil-mne",
+    "github_url": "https://github.com/BeMoBIL/bemobil-mne",
     "show_toc_level": 2,
     "navigation_with_keys": True,
     "navbar_end": ["navbar-icon-links", "theme-switcher"],
