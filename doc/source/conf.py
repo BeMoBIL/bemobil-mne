@@ -65,10 +65,10 @@ intersphinx_mapping = {
 
 html_theme = "pydata_sphinx_theme"
 html_static_path = ["_static"]
-html_baseurl = "https://randomidous.github.io/data-analysis/"
+html_baseurl = "https://randomidous.github.io/bemobil-mne/"
 
 html_theme_options = {
-    "github_url": "https://github.com/Randomidous/data-analysis",
+    "github_url": "https://github.com/Randomidous/bemobil-mne",
     "show_toc_level": 2,
     "navigation_with_keys": True,
     "navbar_end": ["navbar-icon-links", "theme-switcher"],

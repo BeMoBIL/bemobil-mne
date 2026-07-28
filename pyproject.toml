@@ -67,7 +67,7 @@ test = ["BeMoBIL-MNE", "pytest", "pytest-cov", "pytest-sugar", "pytest-xdist"]
 
 [project.urls]
 "Bug Tracker" = "https://github.com/Randomidous/BeMoBIL-MNE/issues/"
-"Documentation" = "https://randomidous.github.io/data-analysis/"
+"Documentation" = "https://randomidous.github.io/bemobil-mne/"
 "Source Code" = "https://github.com/Randomidous/BeMoBIL-MNE/"
 
 [tool.hatch.build]

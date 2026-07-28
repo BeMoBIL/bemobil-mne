@@ -75,8 +75,8 @@ This is a private repository for BPN lab members. Contributions are made via fea
 1. Clone the repo:
 
     ```bash
-    git clone https://github.com/Randomidous/data-analysis.git
-    cd data-analysis
+    git clone https://github.com/Randomidous/bemobil-mne.git
+    cd bemobil-mne
     ```
 
 2. Install in editable mode:
