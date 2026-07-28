@@ -132,6 +132,16 @@ Intentional differences
    (MNE native), which supports lossless compression and carries full metadata including
    the provenance descriptor.
 
+**Bilateral dipole fitting (not yet available)**
+   The original MATLAB implementation supports ``number_of_dipoles=2``, fitting a symmetric
+   bilateral dipole pair per IC.  This is **not currently implemented** in BeMoBIL-MNE:
+   :func:`~bemobil_mne.preproc.fit_dipoles_on_ica`'s ``n_dipoles`` parameter only supports
+   ``1`` (a single equivalent current dipole via :func:`mne.fit_dipole`); passing ``n_dipoles=2``
+   raises :class:`NotImplementedError` rather than silently returning a single-dipole result.
+   MNE has no built-in constrained two-dipole fit, so bilateral fitting would require a custom
+   optimization - unlike the other differences on this page, this is a genuine feature gap
+   rather than a deliberate design choice, and is open for future contribution.
+
 ----
 
 Minimal example
