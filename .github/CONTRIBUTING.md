@@ -1,4 +1,4 @@
-# Contributing to `data-analysis`
+# Contributing to `bemobil-mne`
 
 Thanks for contributing! This guide describes how we develop and how we cut a
 release.
@@ -23,7 +23,7 @@ release.
 ## How to make a release
 
 1. Make sure you have a git remote `upstream` configured to point to
-   <https://github.com/BeMoBIL/data-analysis>.
+   <https://github.com/BeMoBIL/bemobil-mne>.
 2. From your (clean!) `main` branch, run:
    1. `git fetch --all --tags --prune --prune-tags`
    2. `git rebase upstream/main`

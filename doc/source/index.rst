@@ -30,8 +30,8 @@ Installation
 
 .. code-block:: bash
 
-   git clone https://github.com/Randomidous/data-analysis.git
-   cd data-analysis
+   git clone https://github.com/Randomidous/bemobil-mne.git
+   cd bemobil-mne
    pip install -e .
 
 ----
