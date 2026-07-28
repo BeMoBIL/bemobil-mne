@@ -50,9 +50,10 @@ seed = 869330571  # good practice: pick a random seed via secrets.randbits(31)
 # This will create files in the save_path directory; see the docstring of
 # `EEGPreprocessor` for details (e.g., `print(help(EEGPreprocessor))`).
 #
-# `run_raw` returns a 10-tuple:
-#   (raw_minimal, raw_clean, raw_asr, raw_subset, ica, ic_labels,
-#    dipoles, residuals, trans, bad_ch_dict)
+# `run_raw` returns a 3-tuple: (raw_clean, report, metadata).
+# `report` is an `mne.Report` (populated when make_report=True, else None).
+# `metadata` is a dict with keys: raw_minimal, raw_asr, raw_subset, ica,
+# ic_labels, dipoles, residuals, trans, bad_ch_dict.
 #
 # Set fit_dipoles=True to also get dipole fits and trans.
 # line_noise_freq accepts "europe" (50 Hz) or "usa" (60 Hz) as shortcuts,
@@ -70,22 +71,20 @@ preprocessor = EEGPreprocessor(
 )
 
 t_start = time.perf_counter()
-(
-    raw_minimal,
-    raw_clean,
-    raw_asr,
-    raw_subset,
-    ica,
-    ic_labels,
-    dipoles,
-    residuals,
-    trans,
-    bad_ch_dict,
-) = preprocessor.run_raw(
+raw_clean, report, metadata = preprocessor.run_raw(
     raw,
     fname_out=fname_out,
     overwrite=True,
 )
+raw_minimal = metadata["raw_minimal"]
+raw_asr = metadata["raw_asr"]
+raw_subset = metadata["raw_subset"]
+ica = metadata["ica"]
+ic_labels = metadata["ic_labels"]
+dipoles = metadata["dipoles"]
+residuals = metadata["residuals"]
+trans = metadata["trans"]
+bad_ch_dict = metadata["bad_ch_dict"]
 t_stop = time.perf_counter()
 print(f"Processing took {t_stop - t_start:.2f} seconds.")
 
@@ -108,18 +107,7 @@ print(proc_description)
 
 do_dipoles = False  # set to True to enable
 if do_dipoles:
-    (
-        raw_minimal,
-        raw_clean,
-        raw_asr,
-        raw_subset,
-        ica,
-        ic_labels,
-        dipoles,
-        residuals,
-        trans,
-        bad_ch_dict,
-    ) = EEGPreprocessor(
+    raw_clean, report, metadata = EEGPreprocessor(
         loader=None,
         line_noise_freq="usa",
         filter_bands=(0.1, 70.0),
@@ -129,6 +117,15 @@ if do_dipoles:
         trans=None,  # use fsaverage template
         rng_seed=seed,
     ).run_raw(raw, fname_out=fname_out, overwrite=True)
+    raw_minimal = metadata["raw_minimal"]
+    raw_asr = metadata["raw_asr"]
+    raw_subset = metadata["raw_subset"]
+    ica = metadata["ica"]
+    ic_labels = metadata["ic_labels"]
+    dipoles = metadata["dipoles"]
+    residuals = metadata["residuals"]
+    trans = metadata["trans"]
+    bad_ch_dict = metadata["bad_ch_dict"]
 
 # %%
 # You may also run the pipeline without ASR (asr=False is the default),
@@ -136,18 +133,7 @@ if do_dipoles:
 # via fit_ica=False. Set `fname_out=None` to skip saving.
 
 t_start = time.perf_counter()
-(
-    raw_minimal,
-    raw_clean,
-    raw_asr,
-    raw_subset,
-    ica,
-    ic_labels,
-    dipoles,
-    residuals,
-    trans,
-    bad_ch_dict,
-) = EEGPreprocessor(
+raw_clean, report, metadata = EEGPreprocessor(
     loader=None,
     line_noise_freq="usa",
     filter_bands=(0.1, 70.0),
@@ -156,6 +142,15 @@ t_start = time.perf_counter()
     # asr=False is the default - ASR is skipped
     rng_seed=seed,
 ).run_raw(raw, fname_out=None)
+raw_minimal = metadata["raw_minimal"]
+raw_asr = metadata["raw_asr"]
+raw_subset = metadata["raw_subset"]
+ica = metadata["ica"]
+ic_labels = metadata["ic_labels"]
+dipoles = metadata["dipoles"]
+residuals = metadata["residuals"]
+trans = metadata["trans"]
+bad_ch_dict = metadata["bad_ch_dict"]
 t_stop = time.perf_counter()
 print(f"Processing took {t_stop - t_start:.2f} seconds.")
 
