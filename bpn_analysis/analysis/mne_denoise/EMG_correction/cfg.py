@@ -106,8 +106,8 @@ LOADER = XDFLoader(
 # those are the target of the four EMG correction methods below.
 PREPROCESSOR = EEGPreprocessor(
     LOADER,
-    rng_seed=1836791205,
-    asr_cutoff=False,
+    asr=False,
     exclude_labels=["eye blink", "line noise", "channel noise"],
     include_labels=None,
+    rng_seed=1836791205,
 )

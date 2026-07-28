@@ -64,18 +64,19 @@ seed = 869330571  # good practice: pick a random seed via secrets.randbits(31)
 # This will create files in the save_path directory; see the docstring of
 # `EEGPreprocessor` for details (e.g., `print(help(EEGPreprocessor))`).
 #
-# `run_raw` returns a 10-tuple:
-#   raw_minimal, raw_clean, raw_asr, raw_subset,
-#   ica, ic_labels, dipoles, residuals, trans, bad_ch_dict
+# `run_raw` returns a 3-tuple: (raw_clean, report, metadata)
+# metadata contains: raw_minimal, raw_asr, raw_subset, ica, ic_labels,
+#                    dipoles, residuals, trans, bad_ch_dict
 #
-# Set fit_dipoles=True to also get dipole fits, trans, and the subset raw.
-# notch_freqs accepts "europe" (50/100/150 Hz) or "usa" (60/120/180 Hz) as shortcuts.
+# Set fit_dipoles=True to also get dipole fits and trans.
+# line_noise_freq accepts "europe" (50 Hz) or "usa" (60 Hz) as shortcuts,
+# or a float. Harmonics up to Nyquist are computed automatically.
 
 preprocessor = EEGPreprocessor(
     loader=None,  # not needed when calling run_raw() directly
+    line_noise_freq="usa",  # 60 Hz + harmonics up to Nyquist
     filter_bands=(0.1, 70.0),  # eegbci sfreq is 160 Hz; keep h_freq below Nyquist
     filter_bands_ica=(1.0, 70.0),
-    notch_freqs="usa",  # shortcut for (60, 120, 180) Hz
     downsample_ica=None,  # sfreq is 160 Hz; cannot upsample to default 250 Hz
     rng_seed=seed,
     event_id=event_id,  # recorded in provenance metadata
@@ -134,18 +135,18 @@ if do_dipoles:
         bad_ch_dict,
     ) = EEGPreprocessor(
         loader=None,
+        line_noise_freq="usa",
         filter_bands=(0.1, 70.0),
         filter_bands_ica=(1.0, 70.0),
-        notch_freqs="usa",
         downsample_ica=None,
-        rng_seed=seed,
         fit_dipoles=True,
         trans=None,  # use fsaverage template
+        rng_seed=seed,
     ).run_raw(raw, fname_out=fname_out, overwrite=True)
 
 # %%
-# You may also run the pipeline without ASR by passing `asr_cutoff=False`,
-# and/or without ICA via `fit_ica=False`.
+# You may also run the pipeline without ASR (asr=False is the default),
+# or with custom ASR settings via asr={"cutoff": 10}, and/or without ICA via fit_ica=False.
 # Set `fname_out=None` to skip saving.
 
 t_start = time.perf_counter()
@@ -162,11 +163,11 @@ t_start = time.perf_counter()
     bad_ch_dict,
 ) = EEGPreprocessor(
     loader=None,
+    line_noise_freq="usa",
     filter_bands=(0.1, 70.0),
     filter_bands_ica=(1.0, 70.0),
-    notch_freqs="usa",
     downsample_ica=None,
-    asr_cutoff=False,  # skip ASR
+    # asr=False is the default - ASR is skipped
     rng_seed=seed,
 ).run_raw(raw, fname_out=None)
 t_stop = time.perf_counter()

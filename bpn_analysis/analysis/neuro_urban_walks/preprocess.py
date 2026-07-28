@@ -65,16 +65,15 @@ LOADER = XDFLoader(
 
 PREPROCESSOR = EEGPreprocessor(
     loader=LOADER,  # stored but run_raw() is used below
+    channel_types={"ecg": "ecg", "eda": "eda"},  # set types so ICA ignores them
+    line_noise_freq="europe",
     filter_bands=(0.1, 100.0),
+    asr={"cutoff": 20.0},
     filter_bands_ica=(1.0, 100.0),
-    notch_freqs=(50, 100, 150),
     downsample_ica=250.0,
     thresh=0.7,
-    asr_cutoff=20.0,
-    rng_seed=42,
     include_labels=frozenset({"brain", "other"}),
-    # ECG and gaze are merged as misc/ecg channels; set types so ICA ignores them
-    channel_types={"ecg": "ecg", "eda": "eda"},
+    rng_seed=42,
 )
 
 # %% Main driver
