@@ -208,7 +208,10 @@ def _expand_line_noise_freq(line_noise_freq, sfreq):
     else:
         base = float(line_noise_freq)
     nyquist = sfreq / 2
-    n_harmonics = int(nyquist / base)
+    # Leave a 3 Hz margin below Nyquist: mne_denoise's segment_data builds a
+    # ±3 Hz bandpass around each harmonic, so a harmonic at exactly Nyquist
+    # would produce a filter edge above fs/2 and crash scipy.signal.butter.
+    n_harmonics = int((nyquist - 3.0) / base)
     return base * np.arange(1, n_harmonics + 1)
 
 

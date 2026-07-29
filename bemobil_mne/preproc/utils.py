@@ -621,18 +621,36 @@ def compute_ica(
             _use_amica = False
 
     if _use_amica:
-        # AMICA expects (n_samples, n_features) - concatenate epochs along time
-        data = epochs.get_data(picks="eeg")  # (n_epochs, n_chs, n_times)
+        # AMICA expects (n_samples, n_features) - concatenate epochs along time.
+        # Exclude `bads` from the picks (bad channels are only interpolated
+        # later, in run_raw, well after ICA) so that the channel count fed to
+        # AMICA matches the channel count used for the rank estimate below --
+        # otherwise a bad channel like "M1" would be included in `data` but
+        # excluded by compute_rank's default picks, causing a mismatch
+        # unrelated to the average reference.
+        picks_eeg = mne.pick_types(epochs.info, eeg=True, exclude="bads")
+        data = epochs.get_data(picks=picks_eeg)  # (n_epochs, n_chs, n_times)
         n_epochs, n_chs, n_times = data.shape
         data_2d = data.transpose(0, 2, 1).reshape(n_epochs * n_times, n_chs)
 
+        # AMICA's `n_components=None` does NOT mean "auto-detect rank": it
+        # resolves to the full channel count *before* the internal rank
+        # check, so it crashes as soon as the data's actual rank is lower
+        # (e.g. from the average reference, which always removes 1 degree
+        # of freedom once applied). Compute the true rank explicitly instead.
+        # `proj=True` (default) makes this account for the average-reference
+        # projection automatically, and picks match `data` above (bads
+        # excluded from both).
+        rank_dict = mne.compute_rank(epochs.copy().pick(picks_eeg), tol="auto")
+        n_components = sum(rank_dict.values())
+
         amica_model = _AMICA(
-            n_components=None,
+            n_components=n_components,
             random_state=rng_seed,
         )
         amica_model.fit(data_2d)
 
-        info_eeg = mne.pick_info(epochs.info, mne.pick_types(epochs.info, eeg=True))
+        info_eeg = mne.pick_info(epochs.info, picks_eeg)
         ica = amica_model.to_mne(info_eeg)
     else:
         _method = "picard" if ica_method == "amica" else ica_method
