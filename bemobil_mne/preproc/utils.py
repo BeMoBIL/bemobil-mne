@@ -593,7 +593,9 @@ def compute_ica(
     if downsample_ica is not None and raw_ica.info["sfreq"] > downsample_ica:
         raw_ica.resample(downsample_ica)
 
-    raw_ica.set_eeg_reference(ref_channels="average")
+    # Keep the average reference as an SSP projection (baked in later)
+    if not any(p["desc"] == "Average EEG reference" for p in raw_ica.info["projs"]):
+        raw_ica.set_eeg_reference(ref_channels="average", projection=True)
 
     epochs = mne.make_fixed_length_epochs(
         raw_ica, duration=1.0, preload=True, reject_by_annotation=True
