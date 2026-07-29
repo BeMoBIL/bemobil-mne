@@ -764,9 +764,23 @@ class EEGPreprocessor:
             raw_clean = ica.apply(raw_asr.copy())
         else:
             raw_clean = raw_asr.copy()
-        raw_clean.set_eeg_reference(ref_channels="average")
+        # Bake in the average EEG reference here, at the very end of the
+        # pipeline. Up to this point the reference has only ever existed as
+        # an unapplied SSP projection (added with projection=True back in
+        # the "minimal" processing stage and inherited via .copy()/ICA
+        # through raw_asr -> raw_clean and raw_minimal) -- it is only
+        # actually applied to the data now, once, via apply_proj(). The
+        # `set_eeg_reference` calls are only a defensive fallback in case a
+        # given raw somehow doesn't already carry the projection (e.g. if
+        # this method is ever called on a raw prepared outside the normal
+        # run()/run_raw() flow).
+        for _raw_ref in (raw_clean, raw_minimal):
+            if not any(
+                p["desc"] == "Average EEG reference" for p in _raw_ref.info["projs"]
+            ):
+                _raw_ref.set_eeg_reference(ref_channels="average", projection=True)
+            _raw_ref.apply_proj()
         append_desc(raw_clean, name="avg_ref")
-        raw_minimal.set_eeg_reference(ref_channels="average")
         append_desc(raw_minimal, name="avg_ref")
         # Exclude EOG-typed channels from interpolation (they are not on the
         # scalp and spherical interpolation is not meaningful for them)
