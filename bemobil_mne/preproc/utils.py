@@ -512,6 +512,7 @@ def compute_ica(
     exclude_labels=None,
     include_labels=None,
     ica_method="amica",
+    amica_kwargs=None,
 ):
     """Fit ICA on a filtered copy of *raw* and label components with ICLabel.
 
@@ -553,6 +554,11 @@ def compute_ica(
         (e.g. ``"picard"``, ``"fastica"``).  If ``"amica"`` is requested but
         the ``amica`` package is not installed, the method falls back to
         ``"picard"`` with an extended-infomax fit and a warning.
+    amica_kwargs : dict | None
+        Extra keyword arguments forwarded to :class:`amica.AMICA` when
+        ``ica_method="amica"``.  Useful for controlling convergence, e.g.
+        ``{"max_iter": 2000}``.  ``None`` uses AMICA defaults.  Ignored
+        when a non-AMICA method is used.
 
     Returns
     -------
@@ -588,7 +594,6 @@ def compute_ica(
                 stacklevel=2,
             )
     raw_ica.filter(l_freq=None, h_freq=_h_freq_ica)
-    raw_ica.notch_filter(freqs=notch_freqs, notch_widths=1.0)
 
     if downsample_ica is not None and raw_ica.info["sfreq"] > downsample_ica:
         raw_ica.resample(downsample_ica)
@@ -621,18 +626,37 @@ def compute_ica(
             _use_amica = False
 
     if _use_amica:
-        # AMICA expects (n_samples, n_features) - concatenate epochs along time
-        data = epochs.get_data(picks="eeg")  # (n_epochs, n_chs, n_times)
+        # AMICA expects (n_samples, n_features) - concatenate epochs along time.
+        # Exclude `bads` from the picks (bad channels are only interpolated
+        # later, in run_raw, well after ICA) so that the channel count fed to
+        # AMICA matches the channel count used for the rank estimate below --
+        # otherwise a bad channel like "M1" would be included in `data` but
+        # excluded by compute_rank's default picks, causing a mismatch
+        # unrelated to the average reference.
+        picks_eeg = mne.pick_types(epochs.info, eeg=True, exclude="bads")
+        data = epochs.get_data(picks=picks_eeg)  # (n_epochs, n_chs, n_times)
         n_epochs, n_chs, n_times = data.shape
         data_2d = data.transpose(0, 2, 1).reshape(n_epochs * n_times, n_chs)
 
+        # AMICA's `n_components=None` does NOT mean "auto-detect rank": it
+        # resolves to the full channel count *before* the internal rank
+        # check, so it crashes as soon as the data's actual rank is lower
+        # (e.g. from the average reference, which always removes 1 degree
+        # of freedom once applied). Compute the true rank explicitly instead.
+        # `proj=True` (default) makes this account for the average-reference
+        # projection automatically, and picks match `data` above (bads
+        # excluded from both).
+        rank_dict = mne.compute_rank(epochs.copy().pick(picks_eeg), tol="auto")
+        n_components = sum(rank_dict.values())
+
         amica_model = _AMICA(
-            n_components=None,
+            n_components=n_components,
             random_state=rng_seed,
+            **(amica_kwargs or {}),
         )
         amica_model.fit(data_2d)
 
-        info_eeg = mne.pick_info(epochs.info, mne.pick_types(epochs.info, eeg=True))
+        info_eeg = mne.pick_info(epochs.info, picks_eeg)
         ica = amica_model.to_mne(info_eeg)
     else:
         _method = "picard" if ica_method == "amica" else ica_method
@@ -646,7 +670,21 @@ def compute_ica(
         )
         ica.fit(epochs)
 
-    ic_labels = mne_icalabel.label_components(epochs, ica, method="iclabel")
+    # Workaround: the ICLabel .pt weights are saved as float64 but
+    # _format_input produces float32 tensors, causing a Conv2d dtype crash
+    # in newer PyTorch. Patch ICLabelNet.forward to upcast inputs to double.
+    from mne_icalabel.iclabel.network.torch import ICLabelNet as _ICLabelNet
+
+    _orig_forward = _ICLabelNet.forward
+
+    def _forward_double(self, images, psds, autocorr):
+        return _orig_forward(self, images.double(), psds.double(), autocorr.double())
+
+    _ICLabelNet.forward = _forward_double
+    try:
+        ic_labels = mne_icalabel.label_components(epochs, ica, method="iclabel")
+    finally:
+        _ICLabelNet.forward = _orig_forward
 
     labels = ic_labels["labels"]
     probas = ic_labels["y_pred_proba"]  # shape: (n_components, n_classes)
@@ -656,14 +694,13 @@ def compute_ica(
     if popularity_vote:
         # Assign each IC to the class with the highest probability; exclude
         # those that do not belong to a "keep" class.
+        # `labels` already holds the winning label per IC - no need to recompute
+        # it from probas (which avoids an index error where np.argmax would
+        # return a class index (0-6) used to index the component-labels list).
         _keep = (
             set(include_labels) if include_labels is not None else {"brain", "other"}
         )
-        exclude_idx = [
-            idx
-            for idx, row in enumerate(probas)
-            if labels[int(np.argmax(row))] not in _keep
-        ]
+        exclude_idx = [idx for idx, label in enumerate(labels) if label not in _keep]
     elif exclude_labels is not None:
         exclude_idx = [
             idx
