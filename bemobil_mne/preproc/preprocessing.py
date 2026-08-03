@@ -895,7 +895,10 @@ class EEGPreprocessor:
     ):
         """Save all pipeline derivatives to disk."""
         fname_out = Path(fname_out)
-        stem = fname_out.with_suffix("")
+        if fname_out.suffix == ".gz" and fname_out.stem.endswith(".fif"):
+            stem = fname_out.with_name(fname_out.stem[:-4])  # strip .fif.gz
+        else:
+            stem = fname_out.with_suffix("")  # strip .fif
         fname_out.parent.mkdir(parents=True, exist_ok=True)
 
         # raw_clean is saved to fname_out directly (primary output / skip sentinel)
