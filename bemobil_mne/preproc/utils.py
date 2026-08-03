@@ -594,7 +594,6 @@ def compute_ica(
                 stacklevel=2,
             )
     raw_ica.filter(l_freq=None, h_freq=_h_freq_ica)
-    raw_ica.notch_filter(freqs=notch_freqs, notch_widths=1.0)
 
     if downsample_ica is not None and raw_ica.info["sfreq"] > downsample_ica:
         raw_ica.resample(downsample_ica)
@@ -695,14 +694,13 @@ def compute_ica(
     if popularity_vote:
         # Assign each IC to the class with the highest probability; exclude
         # those that do not belong to a "keep" class.
+        # `labels` already holds the winning label per IC - no need to recompute
+        # it from probas (which avoids an index error where np.argmax would
+        # return a class index (0-6) used to index the component-labels list).
         _keep = (
             set(include_labels) if include_labels is not None else {"brain", "other"}
         )
-        exclude_idx = [
-            idx
-            for idx, row in enumerate(probas)
-            if labels[int(np.argmax(row))] not in _keep
-        ]
+        exclude_idx = [idx for idx, label in enumerate(labels) if label not in _keep]
     elif exclude_labels is not None:
         exclude_idx = [
             idx
