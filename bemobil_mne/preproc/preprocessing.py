@@ -334,6 +334,11 @@ class EEGPreprocessor:
         package is not installed.  Any other string is forwarded as the
         ``method`` argument to :class:`mne.preprocessing.ICA` (e.g.
         ``"picard"``, ``"fastica"``).  Ignored when ``fit_ica=False``.
+    amica_kwargs : dict | None
+        Extra keyword arguments forwarded to :class:`amica.AMICA` when
+        ``ica_method="amica"``.  Useful for controlling convergence, e.g.
+        ``{"max_iter": 2000}``.  ``None`` uses AMICA defaults.  Ignored
+        when a non-AMICA method is used or ``fit_ica=False``.
     fit_ica : bool
         If ``False``, skip ICA entirely (``raw_clean`` equals ``raw_asr``).
     thresh : float
@@ -400,6 +405,7 @@ class EEGPreprocessor:
         filter_bands_ica: tuple[float | None, float | None] = (1.75, None),
         downsample_ica: float | None = 250.0,
         ica_method: str = "amica",
+        amica_kwargs: dict | None = None,
         fit_ica: bool = True,
         thresh: float = -1,
         exclude_labels: list | None = None,
@@ -453,6 +459,7 @@ class EEGPreprocessor:
         self.filter_bands_ica = filter_bands_ica
         self.downsample_ica = downsample_ica
         self.ica_method = ica_method
+        self.amica_kwargs = amica_kwargs
         self.fit_ica = fit_ica
         self.thresh = thresh
         self.exclude_labels = exclude_labels
@@ -714,6 +721,7 @@ class EEGPreprocessor:
                 exclude_labels=self.exclude_labels,
                 include_labels=self.include_labels,
                 ica_method=self.ica_method,
+                amica_kwargs=self.amica_kwargs,
             )
             append_desc(
                 raw_asr,

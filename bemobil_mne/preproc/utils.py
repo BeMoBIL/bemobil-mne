@@ -512,6 +512,7 @@ def compute_ica(
     exclude_labels=None,
     include_labels=None,
     ica_method="amica",
+    amica_kwargs=None,
 ):
     """Fit ICA on a filtered copy of *raw* and label components with ICLabel.
 
@@ -553,6 +554,11 @@ def compute_ica(
         (e.g. ``"picard"``, ``"fastica"``).  If ``"amica"`` is requested but
         the ``amica`` package is not installed, the method falls back to
         ``"picard"`` with an extended-infomax fit and a warning.
+    amica_kwargs : dict | None
+        Extra keyword arguments forwarded to :class:`amica.AMICA` when
+        ``ica_method="amica"``.  Useful for controlling convergence, e.g.
+        ``{"max_iter": 2000}``.  ``None`` uses AMICA defaults.  Ignored
+        when a non-AMICA method is used.
 
     Returns
     -------
@@ -647,6 +653,7 @@ def compute_ica(
         amica_model = _AMICA(
             n_components=n_components,
             random_state=rng_seed,
+            **(amica_kwargs or {}),
         )
         amica_model.fit(data_2d)
 
