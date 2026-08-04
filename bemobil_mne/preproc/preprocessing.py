@@ -624,9 +624,16 @@ class EEGPreprocessor:
 
         # --- pre_hook ---
         pre_hook_description = None
+        pre_hook_source = None
         if self.pre_hook is not None:
             if not callable(self.pre_hook):
                 raise TypeError("`pre_hook` must be callable.")
+            try:
+                import inspect as _inspect
+
+                pre_hook_source = _inspect.getsource(self.pre_hook)
+            except (OSError, TypeError):
+                pass
             result = self.pre_hook(raw)
             if isinstance(result, tuple):
                 raw, pre_hook_description = result
@@ -734,6 +741,9 @@ class EEGPreprocessor:
         # --- ICA ---
         dipoles, residuals = [], []
         trans_out = None
+        # Snapshot annotations present at ICA time (after break annotation +
+        # bad-channel detection, before ICA filtering/subsampling removes them)
+        ica_annots = raw_asr.annotations.copy()
         t0 = time.perf_counter()
 
         if self.fit_ica:
@@ -861,6 +871,9 @@ class EEGPreprocessor:
                 thresh=self.thresh,
                 step_timings=timer.timings,
                 tier2=tier2,
+                pre_hook_description=pre_hook_description,
+                pre_hook_source=pre_hook_source,
+                ica_annots=ica_annots,
             )
 
         # --- Save (optional) ---
