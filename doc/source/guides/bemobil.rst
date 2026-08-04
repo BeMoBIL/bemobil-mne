@@ -87,9 +87,6 @@ The following preprocessing parameters are set to match the original MATLAB impl
    * - Line-noise bad-ch criterion
      - off
      - ``line_noise_crit=None``
-   * - Flatline bad-ch criterion
-     - off
-     - ``flatline_crit=None``
    * - Dipole RV threshold
      - 100 % (no threshold)
      - ``rv_thresh=None``

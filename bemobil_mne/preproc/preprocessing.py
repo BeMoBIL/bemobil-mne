@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
 import warnings
 from pathlib import Path
@@ -34,6 +35,8 @@ from bemobil_mne.preproc.utils import (
 # Keep NumpyEncoder importable from this module for backward compatibility
 NumpyEncoder = _NumpyEncoder
 
+LOGGER = logging.getLogger(__name__)
+
 # %% Functions
 
 
@@ -43,16 +46,17 @@ def get_bad_chs(
     notch_lines=np.arange(50, 151, 50),
     notch_width=1.0,
     line_noise_crit=None,
-    flatline_crit=None,
+    deviation_threshold=3.5,
+    ransac=None,
 ):
     """Detect bad EEG channels using PyPREP, FASTER, flatline, and line noise.
 
     Applies optional notch filtering and an average reference, then runs
-    PyPREP's NoisyChannels (nan/flat & correlation methods), FASTER's
-    channel-level correlation on 1s fixed-length epochs, per-channel flatline
-    detection, and per-channel line-noise z-score detection.  Returns a
-    dictionary containing the union of all identified bad channels and
-    per-method breakdowns.
+    PyPREP's NoisyChannels (nan/flat, deviation, HF-noise, correlation,
+    and optionally RANSAC), FASTER's channel-level correlation and variance on 1 s
+    fixed-length epochs, and per-channel line-noise z-score detection.
+    Returns a dictionary containing the union of all identified bad channels
+    and per-method breakdowns.
 
     Parameters
     ----------
@@ -77,12 +81,23 @@ def get_bad_chs(
         ``None`` (default) disables this criterion - recommended when ZapLine
         has already run, as residual line noise is negligible and the criterion
         may produce false rejections.
-    flatline_crit : float | None
-        Maximum allowed duration (seconds) of a flatline segment.  Channels
-        that are flat for longer than this threshold are flagged as bad via
-        PyPREP's ``find_bad_by_nan_flat``.  ``None`` (default) disables this -
-        recommended for MoBI data where transient electrode lifts produce brief
-        flatlines that do not indicate a broken channel.
+    deviation_threshold : float
+        Z-score threshold for PyPREP's amplitude-deviation criterion
+        (``find_bad_by_deviation``).  Channels whose robust z-score of
+        channel-level RMS exceeds this value are flagged as bad.  Default
+        ``3.5`` (tighter than PyPREP's built-in default of ``5.0``) to improve
+        sensitivity on MoBI data where motion raises overall variance.
+    ransac : bool | None
+        Whether to run PyPREP's RANSAC bad-channel detection
+        (``find_bad_by_ransac``), which uses spherical spline interpolation to
+        predict each channel from a random subset of neighbours and flags
+        channels that cannot be reconstructed.  Requires channel positions
+        (i.e. a montage must be set on *raw*).
+
+        - ``None`` (default): run RANSAC automatically when a montage is
+          present; skip silently otherwise.
+        - ``True``: always run; raises if no montage / positions available.
+        - ``False``: never run.
 
     Returns
     -------
@@ -140,7 +155,17 @@ def get_bad_chs(
 
     noisy_channels = NoisyChannels(raw, **pyprep_kwargs)
     noisy_channels.find_bad_by_nan_flat()
+    noisy_channels.find_bad_by_deviation(deviation_threshold=deviation_threshold)
+    noisy_channels.find_bad_by_hfnoise()
     noisy_channels.find_bad_by_correlation()
+
+    _run_ransac = ransac if ransac is not None else (raw.get_montage() is not None)
+    if _run_ransac:
+        try:
+            noisy_channels.find_bad_by_ransac()
+        except Exception as _exc:
+            LOGGER.warning(f"RANSAC bad-channel detection failed: {_exc}")
+
     bads_dict_pyprep = noisy_channels.get_bads(as_dict=True)
 
     # === FASTER ====
@@ -150,7 +175,7 @@ def get_bad_chs(
     bads_dict_faster = mne_faster.find_bad_channels(
         epochs,
         return_by_metric=True,
-        use_metrics=["correlation"],
+        use_metrics=["correlation", "variance"],
     )
     bads_dict_faster["bad_all"] = list(
         set(v for val in bads_dict_faster.values() if len(val) > 0 for v in val)
@@ -302,9 +327,13 @@ class EEGPreprocessor:
         - ``"line_noise_crit"`` (*float | None*, default ``None``): z-score
           threshold for the per-channel line-noise criterion; ``None``
           (default) disables this check - recommended when ZapLine has run.
-        - ``"flatline_crit"`` (*float | None*, default ``None``): maximum
-          flatline duration in seconds before a channel is flagged bad;
-          ``None`` (default) disables this - recommended for MoBI data.
+        - ``"deviation_threshold"`` (*float*, default ``3.5``): z-score
+          threshold for PyPREP's amplitude-deviation criterion.  Tighter
+          than PyPREP's built-in default of ``5.0`` to improve sensitivity
+          on MoBI data; raise to reduce false positives.
+        - ``"ransac"`` (*bool | None*, default ``None``): run PyPREP RANSAC
+          when ``None`` (auto) or ``True``; auto-detects from montage
+          presence.  Set ``False`` to disable explicitly.
     annotate_break_kwargs : dict | None
         Forwarded to :func:`mne.preprocessing.annotate_break`.
     filter_bands : tuple of float
