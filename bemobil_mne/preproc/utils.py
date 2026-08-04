@@ -63,7 +63,18 @@ def _annotate_break_iter(raw, annotate_break_kwargs):
     iter_count = 0
 
     while True:
-        annots_break = mne.preprocessing.annotate_break(raw, **annotate_break_kwargs)
+        try:
+            annots_break = mne.preprocessing.annotate_break(
+                raw, **annotate_break_kwargs
+            )
+        except ValueError as _e:
+            if "Could not find" in str(_e) or "no annotations" in str(_e).lower():
+                LOGGER.info(
+                    "annotate_break: no existing annotations found; "
+                    "skipping break annotation."
+                )
+                return mne.Annotations([], [], []), annotate_break_kwargs
+            raise
 
         total_bad_time = np.finfo(float).eps
         for desc, dur in zip(annots_break.description, annots_break.duration):
@@ -605,6 +616,10 @@ def compute_ica(
     epochs = mne.make_fixed_length_epochs(
         raw_ica, duration=1.0, preload=True, reject_by_annotation=True
     )
+    # Apply the average-reference projection so that ICLabel sees a properly
+    # CAR-referenced dataset (otherwise it emits a warning and may classify
+    # components less accurately).
+    epochs.apply_proj()
 
     bad_epochs = mne_faster.find_bad_epochs(epochs)
     if len(bad_epochs) > 0:
