@@ -334,8 +334,19 @@ class EEGPreprocessor:
         - ``"ransac"`` (*bool | None*, default ``None``): run PyPREP RANSAC
           when ``None`` (auto) or ``True``; auto-detects from montage
           presence.  Set ``False`` to disable explicitly.
+    annotate_breaks : bool
+        If ``True``, run :func:`mne.preprocessing.annotate_break` to mark
+        inter-block breaks (and other gaps between events) as ``BAD_break``
+        annotations, which are then excluded (via ``reject_by_annotation``)
+        from bad-channel detection, ICA fitting, and other downstream steps.
+        Break detection can be overzealous on some recordings (e.g. sparse
+        or irregular event structure), flagging most of the recording as
+        "bad" even though the data itself is fine. Default ``False`` (skip
+        this step entirely); set ``True`` to enable it, tuning behaviour via
+        *annotate_break_kwargs* if needed.
     annotate_break_kwargs : dict | None
-        Forwarded to :func:`mne.preprocessing.annotate_break`.
+        Forwarded to :func:`mne.preprocessing.annotate_break`. Ignored when
+        ``annotate_breaks=False``.
     filter_bands : tuple of float
         ``(l_freq, h_freq)`` for the main bandpass filter applied to
         ``raw_minimal``.
@@ -427,6 +438,7 @@ class EEGPreprocessor:
         line_noise_freq: float | str = "europe",
         zapline_method: str | None = "adaptive",
         get_bad_chs_kwargs: dict | None = None,
+        annotate_breaks: bool = False,
         annotate_break_kwargs: dict | None = None,
         filter_bands: tuple[float | None, float | None] = (0.1, 100.0),
         subset_chs: list | None = None,
@@ -481,6 +493,7 @@ class EEGPreprocessor:
         self.line_noise_freq = line_noise_freq
         self.zapline_method = zapline_method
         self.get_bad_chs_kwargs = get_bad_chs_kwargs or {}
+        self.annotate_breaks = annotate_breaks
         self.annotate_break_kwargs = annotate_break_kwargs
         self.filter_bands = filter_bands
         self.subset_chs = subset_chs
@@ -679,13 +692,14 @@ class EEGPreprocessor:
         )
         timer.log_step("bad_channel_detection", time.perf_counter() - t0)
 
-        # --- Annotate breaks ---
+        # --- Annotate breaks (optional; off by default) ---
         t0 = time.perf_counter()
-        annots_break, final_break_kwargs = _annotate_break_iter(
-            raw, self.annotate_break_kwargs
-        )
-        raw.set_annotations(raw.annotations + annots_break)
-        append_desc(raw, name="annotate_breaks", **final_break_kwargs)
+        if self.annotate_breaks:
+            annots_break, final_break_kwargs = _annotate_break_iter(
+                raw, self.annotate_break_kwargs
+            )
+            raw.set_annotations(raw.annotations + annots_break)
+            append_desc(raw, name="annotate_breaks", **final_break_kwargs)
         timer.log_step("annotate_breaks", time.perf_counter() - t0)
 
         # --- Minimal copy: bandpass + avg-ref projection ---
