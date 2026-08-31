@@ -63,8 +63,12 @@ docs = [
     "numpydoc",
     "sphinx-copybutton",
 ]
+# JAX-accelerated AMICA implementation used by compute_ica(ica_method="jamica")
+# (the default).  Optional: compute_ica falls back to picard with a warning
+# when this is not installed.
+jamica = ["jamica[jax]"]
 # Dependencies for running the test infrastructure
-test = ["BeMoBIL-MNE", "pytest", "pytest-cov", "pytest-sugar", "pytest-xdist"]
+test = ["BeMoBIL-MNE[jamica]", "pytest", "pytest-cov", "pytest-sugar", "pytest-xdist"]
 
 [project.urls]
 "Bug Tracker" = "https://github.com/BeMoBIL/bemobil-mne/issues/"
