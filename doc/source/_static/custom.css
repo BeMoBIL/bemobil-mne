@@ -1,0 +1,18 @@
+/* Force a hard line break between the version and "documentation" in the
+ * header title, rather than relying on the theme's flex layout to wrap it
+ * (which fights back: `.navbar-brand` is a flex container with an
+ * implicit min-width on its children, and `.navbar-header-items__start`
+ * never shrinks). `html_title` in conf.py embeds a literal "\n" between
+ * the version and "documentation"; `pre-line` renders that as an actual
+ * line break while still collapsing any other whitespace normally. */
+.logo__title {
+    white-space: pre-line;
+    line-height: 1.25;
+}
+
+/* `.navbar-brand` has a fixed height/max-height matching the theme's
+ * single-line header. Let it grow now that the title can be two lines. */
+.navbar-brand {
+    height: auto;
+    max-height: none;
+}
