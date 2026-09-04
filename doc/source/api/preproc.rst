@@ -14,7 +14,7 @@ EEG pipeline
 ------------
 
 :class:`~bemobil_mne.preproc.EEGPreprocessor` orchestrates the full pipeline:
-ZapLine → bad-channel detection → bandpass filter → ASR → ICA/AMICA →
+ZapLine → bad-channel detection → bandpass filter → ASR → ICA/JAMICA →
 ICLabel classification → dipole fitting → average re-reference → bad-channel
 interpolation.  All steps are recorded in a provenance descriptor stored on
 the :class:`mne.io.Raw` object.

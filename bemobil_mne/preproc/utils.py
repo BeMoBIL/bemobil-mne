@@ -516,14 +516,13 @@ def _handle_trans(trans, info=None):
 def compute_ica(
     raw,
     filter_bands_ica=(1.0, 100.0),
-    notch_freqs=(50, 100, 150),
     downsample_ica=250,
     thresh=0.7,
     rng_seed=None,
     exclude_labels=None,
     include_labels=None,
-    ica_method="amica",
-    amica_kwargs=None,
+    ica_method="jamica",
+    jamica_kwargs=None,
 ):
     """Fit ICA on a filtered copy of *raw* and label components with ICLabel.
 
@@ -533,8 +532,6 @@ def compute_ica(
         Continuous EEG recording (must contain EEG channels).
     filter_bands_ica : tuple of float
         ``(l_freq, h_freq)`` for the ICA-specific bandpass filter.
-    notch_freqs : array-like
-        Line-noise frequencies to notch out before ICA.
     downsample_ica : float
         Target sampling rate for ICA fitting (anti-aliasing applied
         automatically).  Skipped when the recording is already at or below this
@@ -557,19 +554,22 @@ def compute_ica(
         (e.g. ``["brain", "other"]``).
         Mutually exclusive with *exclude_labels*.
     ica_method : str
-        ICA algorithm to use.  ``"amica"`` (default) uses the
-        `amica-python <https://github.com/scott-huberty/amica-python>`_
-        implementation of Adaptive Mixture ICA and converts the result to an
-        MNE ICA object via ``AMICA.to_mne()``.  Any other string is passed
-        directly as the ``method`` argument to :class:`mne.preprocessing.ICA`
-        (e.g. ``"picard"``, ``"fastica"``).  If ``"amica"`` is requested but
-        the ``amica`` package is not installed, the method falls back to
-        ``"picard"`` with an extended-infomax fit and a warning.
-    amica_kwargs : dict | None
-        Extra keyword arguments forwarded to :class:`amica.AMICA` when
-        ``ica_method="amica"``.  Useful for controlling convergence, e.g.
-        ``{"max_iter": 2000}``.  ``None`` uses AMICA defaults.  Ignored
-        when a non-AMICA method is used.
+        ICA algorithm to use.  ``"jamica"`` (default) uses
+        `jamica <https://github.com/snesmaeili/jamica>`_, a JAX-accelerated
+        reimplementation of Adaptive Mixture ICA (AMICA), via
+        :func:`jamica.fit_ica`.  ``fit_ica`` replicates MNE's whitening/PCA
+        pipeline internally and returns a standard
+        :class:`mne.preprocessing.ICA` object directly.  Any other string is
+        passed directly as the ``method`` argument to
+        :class:`mne.preprocessing.ICA` (e.g. ``"picard"``, ``"fastica"``).
+        If ``"jamica"`` is requested but the ``jamica`` package is not
+        installed, the method falls back to ``"picard"`` with an
+        extended-infomax fit and a warning.
+    jamica_kwargs : dict | None
+        Extra keyword arguments forwarded to :func:`jamica.fit_ica` when
+        ``ica_method="jamica"`` (e.g. ``{"max_iter": 2000, "num_mix": 3}``).
+        ``None`` uses jamica's defaults.  Ignored when a non-jamica method is
+        used.
 
     Returns
     -------
@@ -625,56 +625,49 @@ def compute_ica(
     if len(bad_epochs) > 0:
         epochs.drop(bad_epochs)
 
-    _use_amica = ica_method == "amica"
-    if _use_amica:
+    _use_jamica = ica_method == "jamica"
+    if _use_jamica:
         try:
-            from amica import AMICA as _AMICA
+            from jamica import fit_ica as _fit_ica
         except ImportError:
             import warnings as _warnings
 
             _warnings.warn(
-                "amica-python is not installed; falling back to picard. "
-                "Install with: pip install 'amica-python[torch-cpu]'",
+                "jamica is not installed; falling back to picard. "
+                "Install with: pip install 'jamica[jax]'",
                 ImportWarning,
                 stacklevel=2,
             )
-            _use_amica = False
+            _use_jamica = False
 
-    if _use_amica:
-        # AMICA expects (n_samples, n_features) - concatenate epochs along time.
+    if _use_jamica:
         # Exclude `bads` from the picks (bad channels are only interpolated
         # later, in run_raw, well after ICA) so that the channel count fed to
-        # AMICA matches the channel count used for the rank estimate below --
-        # otherwise a bad channel like "M1" would be included in `data` but
-        # excluded by compute_rank's default picks, causing a mismatch
-        # unrelated to the average reference.
+        # jamica's internal whitening/PCA matches the channel count used for
+        # the rank estimate below -- otherwise a bad channel like "M1" would
+        # be included in the picks passed to fit_ica but excluded by
+        # compute_rank's default picks, causing a mismatch unrelated to the
+        # average reference.
         picks_eeg = mne.pick_types(epochs.info, eeg=True, exclude="bads")
-        data = epochs.get_data(picks=picks_eeg)  # (n_epochs, n_chs, n_times)
-        n_epochs, n_chs, n_times = data.shape
-        data_2d = data.transpose(0, 2, 1).reshape(n_epochs * n_times, n_chs)
 
-        # AMICA's `n_components=None` does NOT mean "auto-detect rank": it
-        # resolves to the full channel count *before* the internal rank
-        # check, so it crashes as soon as the data's actual rank is lower
-        # (e.g. from the average reference, which always removes 1 degree
-        # of freedom once applied). Compute the true rank explicitly instead.
-        # `proj=True` (default) makes this account for the average-reference
-        # projection automatically, and picks match `data` above (bads
-        # excluded from both).
+        # jamica.fit_ica's `n_components=None` already resolves to the
+        # estimated numerical rank of the data, but we compute it explicitly
+        # here too so the picks and the component count always agree with
+        # each other (e.g. accounting for the average reference, which
+        # always removes 1 degree of freedom once applied), regardless of
+        # jamica's internal rank estimator.
         rank_dict = mne.compute_rank(epochs.copy().pick(picks_eeg), tol="auto")
         n_components = sum(rank_dict.values())
 
-        amica_model = _AMICA(
+        ica = _fit_ica(
+            epochs,
+            picks=picks_eeg,
             n_components=n_components,
             random_state=rng_seed,
-            **(amica_kwargs or {}),
+            **(jamica_kwargs or {}),
         )
-        amica_model.fit(data_2d)
-
-        info_eeg = mne.pick_info(epochs.info, picks_eeg)
-        ica = amica_model.to_mne(info_eeg)
     else:
-        _method = "picard" if ica_method == "amica" else ica_method
+        _method = "picard" if ica_method == "jamica" else ica_method
         ica = mne.preprocessing.ICA(
             n_components=None,
             random_state=rng_seed,

@@ -31,7 +31,7 @@ Overview
      - MNE-Python
    * - ICA
      - AMICA (native MATLAB)
-     - AMICA via ``amica-python`` (falls back to picard)
+     - AMICA via ``jamica`` (falls back to picard)
    * - IC classification
      - ICLabel (EEGLAB plugin)
      - ``mne-icalabel``
@@ -166,7 +166,7 @@ The following script replicates the core BeMoBIL EEG preprocessing steps using B
        filter_bands=(0.1, 100.0),     # broad bandpass (BeMoBIL keeps full band)
        filter_bands_ica=(1.75, None), # filter_lowCutoffFreqAMICA = 1.75
        downsample_ica=250.0,          # resample_freq = 250
-       ica_method="amica",            # AMICA
+       ica_method="jamica",           # AMICA (via jamica)
        thresh=-1,                     # iclabel_threshold = -1
        # include_labels default = all except eye blink (iclabel_classes = [1 2 4 5 6 7])
        fit_dipoles=True,              # dipole fitting on
