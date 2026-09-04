@@ -16,9 +16,11 @@ author = "Roy Eric Wieske"
 try:
     from bemobil_mne import __version__
 
-    release = __version__
+    release = __version__.split("+")[0]
 except Exception:
     release = ""
+
+version = release
 
 # -- General configuration ---------------------------------------------------
 
