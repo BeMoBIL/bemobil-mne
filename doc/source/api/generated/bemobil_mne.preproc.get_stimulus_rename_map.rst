@@ -1,5 +1,5 @@
-﻿bpn\_analysis.preproc.get\_stimulus\_rename\_map
-================================================
+﻿bemobil\_mne.preproc.get\_stimulus\_rename\_map
+===============================================
 
 .. currentmodule:: bemobil_mne.preproc
 

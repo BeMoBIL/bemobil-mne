@@ -1,5 +1,5 @@
-﻿bpn\_analysis.preproc.compute\_mi\_reduction
-============================================
+﻿bemobil\_mne.preproc.compute\_mi\_reduction
+===========================================
 
 .. currentmodule:: bemobil_mne.preproc
 

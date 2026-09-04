@@ -1,6 +1,6 @@
-﻿bemobil\_mne.preproc.compute\_asr
+﻿bemobil\_mne.preproc.make\_report
 =================================
 
 .. currentmodule:: bemobil_mne.preproc
 
-.. autofunction:: compute_asr
+.. autofunction:: make_report

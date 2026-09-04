@@ -1,5 +1,5 @@
-﻿bpn\_analysis.preproc.auto\_coreg\_fsaverage
-============================================
+﻿bemobil\_mne.preproc.auto\_coreg\_fsaverage
+===========================================
 
 .. currentmodule:: bemobil_mne.preproc
 

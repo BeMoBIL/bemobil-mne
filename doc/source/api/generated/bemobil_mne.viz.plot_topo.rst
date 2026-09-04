@@ -1,5 +1,5 @@
-﻿bpn\_analysis.viz.plot\_topo
-============================
+﻿bemobil\_mne.viz.plot\_topo
+===========================
 
 .. currentmodule:: bemobil_mne.viz
 

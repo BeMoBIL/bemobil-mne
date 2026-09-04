@@ -1,5 +1,5 @@
-﻿bpn\_analysis.preproc.EpochPreparer
-===================================
+﻿bemobil\_mne.preproc.EpochPreparer
+==================================
 
 .. currentmodule:: bemobil_mne.preproc
 

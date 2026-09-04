@@ -1,5 +1,5 @@
-﻿bpn\_analysis.io.MultimodalRecording
-====================================
+﻿bemobil\_mne.io.MultimodalRecording
+===================================
 
 .. currentmodule:: bemobil_mne.io
 

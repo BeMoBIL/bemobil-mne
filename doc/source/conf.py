@@ -67,6 +67,15 @@ intersphinx_mapping = {
 
 html_theme = "pydata_sphinx_theme"
 html_baseurl = "https://bemobil.github.io/bemobil-mne/"
+html_static_path = ["_static"]
+html_css_files = ["custom.css"]
+
+# Force an explicit line break between the version and "documentation"
+# in the header title, instead of fighting the theme's flex layout to
+# make it wrap on its own -- paired with `white-space: pre-line` on
+# `.logo__title` in custom.css, which renders this literal "\n" as an
+# actual line break.
+html_title = f"{project} {release}\ndocumentation"
 
 html_theme_options = {
     "github_url": "https://github.com/BeMoBIL/bemobil-mne",

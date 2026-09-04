@@ -1,5 +1,5 @@
-﻿bpn\_analysis.preproc.split\_by\_rigid\_body
-============================================
+﻿bemobil\_mne.preproc.split\_by\_rigid\_body
+===========================================
 
 .. currentmodule:: bemobil_mne.preproc
 

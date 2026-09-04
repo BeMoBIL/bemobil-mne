@@ -1,5 +1,5 @@
-﻿bpn\_analysis.viz.plot\_PSD
-===========================
+﻿bemobil\_mne.viz.plot\_PSD
+==========================
 
 .. currentmodule:: bemobil_mne.viz
 

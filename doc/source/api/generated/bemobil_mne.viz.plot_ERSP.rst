@@ -1,5 +1,5 @@
-﻿bpn\_analysis.viz.plot\_ERSP
-============================
+﻿bemobil\_mne.viz.plot\_ERSP
+===========================
 
 .. currentmodule:: bemobil_mne.viz
 

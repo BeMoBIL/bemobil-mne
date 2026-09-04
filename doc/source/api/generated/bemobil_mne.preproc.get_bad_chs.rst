@@ -1,5 +1,5 @@
-﻿bpn\_analysis.preproc.get\_bad\_chs
-===================================
+﻿bemobil\_mne.preproc.get\_bad\_chs
+==================================
 
 .. currentmodule:: bemobil_mne.preproc
 

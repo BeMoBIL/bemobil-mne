@@ -1,5 +1,5 @@
-﻿bpn\_analysis.viz.plot\_butterfly
-=================================
+﻿bemobil\_mne.viz.plot\_butterfly
+================================
 
 .. currentmodule:: bemobil_mne.viz
 

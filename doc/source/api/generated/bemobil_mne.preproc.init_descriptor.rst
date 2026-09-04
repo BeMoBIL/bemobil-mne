@@ -1,5 +1,5 @@
-﻿bpn\_analysis.preproc.init\_descriptor
-======================================
+﻿bemobil\_mne.preproc.init\_descriptor
+=====================================
 
 .. currentmodule:: bemobil_mne.preproc
 

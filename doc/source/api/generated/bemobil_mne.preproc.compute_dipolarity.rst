@@ -1,5 +1,5 @@
-﻿bpn\_analysis.preproc.compute\_dipolarity
-=========================================
+﻿bemobil\_mne.preproc.compute\_dipolarity
+========================================
 
 .. currentmodule:: bemobil_mne.preproc
 

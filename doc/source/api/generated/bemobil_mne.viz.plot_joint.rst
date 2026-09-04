@@ -1,5 +1,5 @@
-﻿bpn\_analysis.viz.plot\_joint
-=============================
+﻿bemobil\_mne.viz.plot\_joint
+============================
 
 .. currentmodule:: bemobil_mne.viz
 

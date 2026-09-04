@@ -1,5 +1,5 @@
-﻿bpn\_analysis.preproc.fit\_dipoles\_on\_ica
-===========================================
+﻿bemobil\_mne.preproc.fit\_dipoles\_on\_ica
+==========================================
 
 .. currentmodule:: bemobil_mne.preproc
 

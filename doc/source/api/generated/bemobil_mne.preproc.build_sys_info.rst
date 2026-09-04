@@ -1,5 +1,5 @@
-﻿bpn\_analysis.preproc.build\_sys\_info
-======================================
+﻿bemobil\_mne.preproc.build\_sys\_info
+=====================================
 
 .. currentmodule:: bemobil_mne.preproc
 

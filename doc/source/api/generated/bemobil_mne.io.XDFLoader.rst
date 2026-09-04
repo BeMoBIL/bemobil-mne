@@ -1,5 +1,5 @@
-﻿bpn\_analysis.io.XDFLoader
-==========================
+﻿bemobil\_mne.io.XDFLoader
+=========================
 
 .. currentmodule:: bemobil_mne.io
 

@@ -1,5 +1,5 @@
-﻿bpn\_analysis.preproc.compute\_zapline
-======================================
+﻿bemobil\_mne.preproc.compute\_zapline
+=====================================
 
 .. currentmodule:: bemobil_mne.preproc
 
