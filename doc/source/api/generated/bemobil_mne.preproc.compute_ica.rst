@@ -1,5 +1,5 @@
-﻿bpn\_analysis.preproc.compute\_ica
-==================================
+﻿bemobil\_mne.preproc.compute\_ica
+=================================
 
 .. currentmodule:: bemobil_mne.preproc
 

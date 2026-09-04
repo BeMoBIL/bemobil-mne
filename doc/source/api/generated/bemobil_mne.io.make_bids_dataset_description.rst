@@ -1,5 +1,5 @@
-﻿bpn\_analysis.io.make\_bids\_dataset\_description
-=================================================
+﻿bemobil\_mne.io.make\_bids\_dataset\_description
+================================================
 
 .. currentmodule:: bemobil_mne.io
 

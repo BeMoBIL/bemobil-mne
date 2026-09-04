@@ -1,5 +1,5 @@
-﻿bpn\_analysis.viz.plot\_psd\_topomaps
-=====================================
+﻿bemobil\_mne.viz.plot\_psd\_topomaps
+====================================
 
 .. currentmodule:: bemobil_mne.viz
 

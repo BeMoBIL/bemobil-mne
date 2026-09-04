@@ -1,5 +1,5 @@
-﻿bpn\_analysis.preproc.detect\_bad\_by\_line\_noise
-==================================================
+﻿bemobil\_mne.preproc.detect\_bad\_by\_line\_noise
+=================================================
 
 .. currentmodule:: bemobil_mne.preproc
 

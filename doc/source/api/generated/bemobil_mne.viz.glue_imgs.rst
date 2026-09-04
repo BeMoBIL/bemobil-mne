@@ -1,5 +1,5 @@
-﻿bpn\_analysis.viz.glue\_imgs
-============================
+﻿bemobil\_mne.viz.glue\_imgs
+===========================
 
 .. currentmodule:: bemobil_mne.viz
 

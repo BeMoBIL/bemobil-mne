@@ -1,5 +1,5 @@
-﻿bpn\_analysis.io.align\_stream\_to\_timestamps
-==============================================
+﻿bemobil\_mne.io.align\_stream\_to\_timestamps
+=============================================
 
 .. currentmodule:: bemobil_mne.io
 

@@ -1,5 +1,5 @@
-﻿bpn\_analysis.preproc.append\_desc
-==================================
+﻿bemobil\_mne.preproc.append\_desc
+=================================
 
 .. currentmodule:: bemobil_mne.preproc
 

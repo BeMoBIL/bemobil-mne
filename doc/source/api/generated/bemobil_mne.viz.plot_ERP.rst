@@ -1,5 +1,5 @@
-﻿bpn\_analysis.viz.plot\_ERP
-===========================
+﻿bemobil\_mne.viz.plot\_ERP
+==========================
 
 .. currentmodule:: bemobil_mne.viz
 

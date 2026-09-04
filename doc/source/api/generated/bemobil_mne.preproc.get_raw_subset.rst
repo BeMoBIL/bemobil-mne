@@ -1,5 +1,5 @@
-﻿bpn\_analysis.preproc.get\_raw\_subset
-======================================
+﻿bemobil\_mne.preproc.get\_raw\_subset
+=====================================
 
 .. currentmodule:: bemobil_mne.preproc
 

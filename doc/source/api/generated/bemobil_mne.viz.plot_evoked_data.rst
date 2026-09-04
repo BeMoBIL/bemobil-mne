@@ -1,5 +1,5 @@
-﻿bpn\_analysis.viz.plot\_evoked\_data
-====================================
+﻿bemobil\_mne.viz.plot\_evoked\_data
+===================================
 
 .. currentmodule:: bemobil_mne.viz
 

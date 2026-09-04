@@ -1,5 +1,5 @@
-﻿bpn\_analysis.preproc.process\_rigid\_body
-==========================================
+﻿bemobil\_mne.preproc.process\_rigid\_body
+=========================================
 
 .. currentmodule:: bemobil_mne.preproc
 

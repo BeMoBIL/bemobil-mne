@@ -1,5 +1,5 @@
-﻿bpn\_analysis.preproc.EEGPreprocessor
-=====================================
+﻿bemobil\_mne.preproc.EEGPreprocessor
+====================================
 
 .. currentmodule:: bemobil_mne.preproc
 

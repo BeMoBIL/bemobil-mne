@@ -1,5 +1,5 @@
-﻿bpn\_analysis.preproc.StepTimer
-===============================
+﻿bemobil\_mne.preproc.StepTimer
+==============================
 
 .. currentmodule:: bemobil_mne.preproc
 
