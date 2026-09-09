@@ -321,6 +321,18 @@ class XDFLoader:
         Default interpolation method for all Tier-1 auxiliary streams.
         Can be overridden per stream via the ``"method"`` key in
         ``special_streams``.  Default: ``'pchip'``.
+    dejitter_timestamps : bool
+        Passed through to ``pyxdf.load_xdf``.  When ``True``, pyxdf
+        replaces each stream's timestamps within a segment with a linear fit
+        against sample index, which assumes a constant sampling rate and can
+        badly distort timing for streams with genuinely variable sample
+        intervals (e.g. eye-tracking streams). Since this loader does
+        its own timestamp-aware alignment (see ``alignment_method``) directly
+        against the raw ``time_stamps`` pyxdf returns, dejittering is off
+        by default so that alignment and gap detection see genuine per-sample
+        timing. Set ``True`` only if your recording has no irregular-rate
+        streams and you specifically want pyxdf's jitter smoothing on the
+        regular ones. Default: ``False``.
     max_nan_gap_s : float or None
         NaN gaps longer than this (seconds) in auxiliary streams are preserved
         in the output rather than bridged.  ``None`` fills all gaps.
@@ -352,6 +364,7 @@ class XDFLoader:
         alignment_method: Literal[
             "linear", "pchip", "sinc", "nearest", "stim"
         ] = "pchip",
+        dejitter_timestamps: bool = False,
         max_nan_gap_s: float | None = None,
         on_mismatch: Literal["crop", "pad"] = "crop",
     ):
@@ -371,6 +384,7 @@ class XDFLoader:
         self.drop_channels = drop_channels
         self.target_sfreq = target_sfreq
         self.alignment_method = alignment_method
+        self.dejitter_timestamps = dejitter_timestamps
         self.max_nan_gap_s = max_nan_gap_s
         self.on_mismatch = on_mismatch
 
@@ -392,7 +406,9 @@ class XDFLoader:
         if path.suffix.lower() != ".xdf":
             raise ValueError(f"Expected an XDF file, got: {path.suffix}")
 
-        streams, _ = pyxdf.load_xdf(str(path))
+        streams, _ = pyxdf.load_xdf(
+            str(path), dejitter_timestamps=self.dejitter_timestamps
+        )
         logger.info("Loaded %d streams from %s", len(streams), path.name)
         for s in streams:
             info = s["info"]
