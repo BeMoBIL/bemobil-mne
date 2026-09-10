@@ -678,17 +678,18 @@ def compute_ica(
         )
         ica.fit(epochs)
 
-    # Workaround: the ICLabel .pt weights are saved as float64 but
-    # _format_input produces float32 tensors, causing a Conv2d dtype crash
-    # in newer PyTorch. Patch ICLabelNet.forward to upcast inputs to double.
+    # Workaround: mne-icalabel's _format_input and model weights can end up
+    # with mismatched dtypes depending on the installed version.  Patch
+    # ICLabelNet.forward to normalize all inputs to float32 (the dtype the
+    # shipped .pt weights use for their bias tensors).
     from mne_icalabel.iclabel.network.torch import ICLabelNet as _ICLabelNet
 
     _orig_forward = _ICLabelNet.forward
 
-    def _forward_double(self, images, psds, autocorr):
-        return _orig_forward(self, images.double(), psds.double(), autocorr.double())
+    def _forward_float(self, images, psds, autocorr):
+        return _orig_forward(self, images.float(), psds.float(), autocorr.float())
 
-    _ICLabelNet.forward = _forward_double
+    _ICLabelNet.forward = _forward_float
     try:
         ic_labels = mne_icalabel.label_components(epochs, ica, method="iclabel")
     finally:
