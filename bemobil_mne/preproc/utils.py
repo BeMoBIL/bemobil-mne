@@ -18,9 +18,10 @@ from pathlib import Path
 
 import mne
 import mne_faster
-import mne_icalabel
 import numpy as np
 from meegkit.asr import ASR
+from mne_icalabel.config import ICALABEL_METHODS_NUMERICAL_TO_STRING
+from mne_icalabel.iclabel import iclabel_label_components
 
 LOGGER = logging.getLogger(__name__)
 
@@ -643,21 +644,11 @@ def compute_ica(
             _use_jamica = False
 
     if _use_jamica:
-        # Exclude `bads` from the picks (bad channels are only interpolated
-        # later, in run_raw, well after ICA) so that the channel count fed to
-        # jamica's internal whitening/PCA matches the channel count used for
-        # the rank estimate below -- otherwise a bad channel like "M1" would
+        # Exclude `bads` from the picks, otherwise a bad channel would
         # be included in the picks passed to fit_ica but excluded by
         # compute_rank's default picks, causing a mismatch unrelated to the
         # average reference.
         picks_eeg = mne.pick_types(epochs.info, eeg=True, exclude="bads")
-
-        # jamica.fit_ica's `n_components=None` already resolves to the
-        # estimated numerical rank of the data, but we compute it explicitly
-        # here too so the picks and the component count always agree with
-        # each other (e.g. accounting for the average reference, which
-        # always removes 1 degree of freedom once applied), regardless of
-        # jamica's internal rank estimator.
         rank_dict = mne.compute_rank(epochs.copy().pick(picks_eeg), tol="auto")
         n_components = sum(rank_dict.values())
 
@@ -680,21 +671,12 @@ def compute_ica(
         )
         ica.fit(epochs)
 
-    # Workaround: the ICLabel .pt weights are saved as float64 but
-    # _format_input produces float32 tensors, causing a Conv2d dtype crash
-    # in newer PyTorch. Patch ICLabelNet.forward to upcast inputs to double.
-    from mne_icalabel.iclabel.network.torch import ICLabelNet as _ICLabelNet
-
-    _orig_forward = _ICLabelNet.forward
-
-    def _forward_double(self, images, psds, autocorr):
-        return _orig_forward(self, images.double(), psds.double(), autocorr.double())
-
-    _ICLabelNet.forward = _forward_double
-    try:
-        ic_labels = mne_icalabel.label_components(epochs, ica, method="iclabel")
-    finally:
-        _ICLabelNet.forward = _orig_forward
+    _proba = iclabel_label_components(epochs, ica, backend="onnx")
+    _pred = np.argmax(_proba, axis=1)
+    ic_labels = {
+        "y_pred_proba": _proba[np.arange(_proba.shape[0]), _pred],
+        "labels": [ICALABEL_METHODS_NUMERICAL_TO_STRING["iclabel"][i] for i in _pred],
+    }
 
     labels = ic_labels["labels"]
     probas = ic_labels["y_pred_proba"]  # shape: (n_components, n_classes)

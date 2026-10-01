@@ -124,7 +124,7 @@ def get_bad_chs(
             )
 
     # Consensus preprocessing steps before finding bads
-    raw = raw.set_eeg_reference("average", projection=True)
+    raw = raw.set_eeg_reference("average", projection=False)
     if notch_lines is not None:
         notch_lines_arr = np.asarray(notch_lines)
         nyquist = raw.info["sfreq"] / 2
@@ -195,8 +195,6 @@ def get_bad_chs(
         "bad_by_line_noise": bad_by_line_noise,
         "bad_by_manual": bad_by_manual,
     }
-
-    raw.del_proj()
     return bad_ch_dict
 
 
