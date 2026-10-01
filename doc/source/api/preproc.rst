@@ -69,7 +69,7 @@ in isolation.
 .. autosummary::
    :toctree: generated/
 
-   compute_zapline
+   remove_line
    compute_asr
    compute_ica
    detect_bad_by_line_noise

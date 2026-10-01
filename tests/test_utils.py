@@ -3,6 +3,8 @@
 # %% Imports
 
 import logging
+import sys
+import types
 
 import mne
 import numpy as np
@@ -14,7 +16,7 @@ from bemobil_mne.preproc.utils import (
     build_sys_info,
     compute_asr,
     compute_mi_reduction,
-    compute_zapline,
+    remove_line,
     detect_bad_by_line_noise,
     format_duration,
     get_descriptor,
@@ -208,7 +210,7 @@ def test_get_raw_subset_returns_none_when_none_present(tiny_raw):
     assert sub is None
 
 
-# %% compute_zapline
+# %% remove_line
 
 
 @pytest.fixture
@@ -224,29 +226,25 @@ def eeg_with_line_noise(rng):
     return mne.io.RawArray(data, info, verbose=False)
 
 
-def test_compute_zapline_dss_line_runs(eeg_with_line_noise):
+def test_remove_line_dss_line_runs(eeg_with_line_noise):
     """Run dss_line zapline without error, preserve shape."""
-    raw_clean = compute_zapline(
-        eeg_with_line_noise, noise_freqs=50.0, method="dss_line"
-    )
+    raw_clean = remove_line(eeg_with_line_noise, noise_freqs=50.0, method="dss_line")
     assert raw_clean.get_data().shape == eeg_with_line_noise.get_data().shape
 
 
-def test_compute_zapline_dss_line_iter_runs(eeg_with_line_noise):
+def test_remove_line_dss_line_iter_runs(eeg_with_line_noise):
     """Run dss_line_iter zapline without error, preserve shape."""
-    raw_clean = compute_zapline(
+    raw_clean = remove_line(
         eeg_with_line_noise, noise_freqs=50.0, method="dss_line_iter"
     )
     assert raw_clean.get_data().shape == eeg_with_line_noise.get_data().shape
 
 
-def test_compute_zapline_dss_line_reduces_noise(eeg_with_line_noise):
+def test_remove_line_dss_line_reduces_noise(eeg_with_line_noise):
     """Power at 50 Hz should decrease after ZapLine."""
     sfreq = eeg_with_line_noise.info["sfreq"]
     data_before = eeg_with_line_noise.get_data(picks=[0])
-    raw_clean = compute_zapline(
-        eeg_with_line_noise, noise_freqs=50.0, method="dss_line"
-    )
+    raw_clean = remove_line(eeg_with_line_noise, noise_freqs=50.0, method="dss_line")
     data_after = raw_clean.get_data(picks=[0])
 
     freqs = np.fft.rfftfreq(data_before.shape[1], d=1.0 / sfreq)
@@ -258,48 +256,95 @@ def test_compute_zapline_dss_line_reduces_noise(eeg_with_line_noise):
     assert psd_after[idx_50] < psd_before[idx_50]
 
 
-def test_compute_zapline_europe_preset(eeg_with_line_noise):
-    """Verify compute_zapline accepts the europe noise_freqs preset."""
-    raw_clean = compute_zapline(
+def test_remove_line_europe_preset(eeg_with_line_noise):
+    """Verify remove_line accepts the europe noise_freqs preset."""
+    raw_clean = remove_line(
         eeg_with_line_noise, noise_freqs="europe", method="dss_line"
     )
     assert raw_clean.get_data().shape == eeg_with_line_noise.get_data().shape
 
 
-def test_compute_zapline_usa_preset(eeg_with_line_noise):
-    """Verify compute_zapline accepts the usa noise_freqs preset."""
+def test_remove_line_usa_preset(eeg_with_line_noise):
+    """Verify remove_line accepts the usa noise_freqs preset."""
     # usa has 60 Hz - above half of 500 Hz sfreq is fine, below Nyquist
-    raw_clean = compute_zapline(
-        eeg_with_line_noise, noise_freqs="usa", method="dss_line"
-    )
+    raw_clean = remove_line(eeg_with_line_noise, noise_freqs="usa", method="dss_line")
     assert raw_clean is not None
 
 
-def test_compute_zapline_unknown_preset_raises(eeg_with_line_noise):
+def test_remove_line_unknown_preset_raises(eeg_with_line_noise):
     """Raise ValueError for unrecognised noise_freqs preset."""
     with pytest.raises(ValueError, match="Unknown noise_freqs preset"):
-        compute_zapline(eeg_with_line_noise, noise_freqs="asia")
+        remove_line(eeg_with_line_noise, noise_freqs="asia")
 
 
-def test_compute_zapline_unknown_method_raises(eeg_with_line_noise):
-    """Raise ValueError for unrecognised zapline method."""
-    with pytest.raises(ValueError, match="Unknown zapline method"):
-        compute_zapline(eeg_with_line_noise, noise_freqs=50.0, method="bogus_method")
+def test_remove_line_array_raises(eeg_with_line_noise):
+    """Reject arrays: only the fundamental is accepted, harmonics are implied."""
+    with pytest.raises(TypeError, match="noise_freqs must be a float"):
+        remove_line(eeg_with_line_noise, noise_freqs=[50.0, 100.0])
 
 
-def test_compute_zapline_above_nyquist_skipped(eeg_with_line_noise):
+def test_remove_line_unknown_method_raises(eeg_with_line_noise):
+    """Raise ValueError for unrecognised line-noise method."""
+    with pytest.raises(ValueError, match="Unknown line-noise method"):
+        remove_line(eeg_with_line_noise, noise_freqs=50.0, method="bogus_method")
+
+
+def test_remove_line_above_nyquist_skipped(eeg_with_line_noise):
     """Skip frequencies above Nyquist, return raw unchanged."""
     sfreq = eeg_with_line_noise.info["sfreq"]
-    raw_clean = compute_zapline(
-        eeg_with_line_noise, noise_freqs=sfreq, method="dss_line"
-    )
+    raw_clean = remove_line(eeg_with_line_noise, noise_freqs=sfreq, method="dss_line")
     np.testing.assert_array_equal(raw_clean.get_data(), eeg_with_line_noise.get_data())
 
 
-def test_compute_zapline_none_freq_raises_for_dss(eeg_with_line_noise):
+def test_remove_line_none_freq_raises_for_dss(eeg_with_line_noise):
     """Raise ValueError when noise_freqs is None."""
     with pytest.raises(ValueError, match="noise_freqs cannot be None"):
-        compute_zapline(eeg_with_line_noise, noise_freqs=None, method="dss_line")
+        remove_line(eeg_with_line_noise, noise_freqs=None, method="dss_line")
+
+
+@pytest.fixture
+def fake_meegkit(monkeypatch):
+    """Stub meegkit.dss and record the kwargs each function is called with."""
+    calls = {}
+
+    def _fake(name):
+        def _func(data, **kwargs):
+            calls[name] = kwargs
+            return data, None
+
+        return _func
+
+    fake_dss = types.SimpleNamespace(
+        dss_line=_fake("dss_line"), dss_line_iter=_fake("dss_line_iter")
+    )
+    monkeypatch.setitem(sys.modules, "meegkit", types.SimpleNamespace(dss=fake_dss))
+    monkeypatch.setitem(sys.modules, "meegkit.dss", fake_dss)
+    return calls
+
+
+@pytest.mark.parametrize("method", ["dss_line", "dss_line_iter"])
+def test_remove_line_forwards_method_kwargs(eeg_with_line_noise, fake_meegkit, method):
+    """Forward method_kwargs to the chosen backend, overriding defaults."""
+    remove_line(
+        eeg_with_line_noise,
+        noise_freqs=50.0,
+        method=method,
+        method_kwargs={"nfft": 512, "foo": 1},
+    )
+    assert fake_meegkit[method]["fline"] == 50.0
+    assert fake_meegkit[method]["nfft"] == 512
+    assert fake_meegkit[method]["foo"] == 1
+
+
+def test_remove_line_reserved_kwargs_raise(eeg_with_line_noise, fake_meegkit):
+    """Reject method_kwargs that would override the sampling/line frequency."""
+    with pytest.raises(ValueError, match="method_kwargs cannot set"):
+        remove_line(
+            eeg_with_line_noise,
+            noise_freqs=50.0,
+            method="dss_line",
+            method_kwargs={"fline": 60.0},
+        )
 
 
 # %% detect_bad_by_line_noise

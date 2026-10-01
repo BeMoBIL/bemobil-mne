@@ -7,10 +7,12 @@ import inspect
 import io
 import json
 import logging
+import numbers
 import os
 import shutil
 import subprocess
 import sys
+import warnings as _warnings
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
@@ -937,13 +939,21 @@ def compute_mi_reduction(raw_before, raw_after, picks="eeg"):
     }
 
 
-def compute_zapline(
+def _check_reserved_kwargs(kwargs, reserved):
+    """Raise if *kwargs* sets an argument that remove_line controls."""
+    clash = sorted(set(kwargs) & set(reserved))
+    if clash:
+        raise ValueError(
+            f"method_kwargs cannot set {clash}; these are derived from raw "
+            "and noise_freqs."
+        )
+
+
+def remove_line(
     raw,
     noise_freqs,
     method="adaptive",
-    n_remove=1,
-    threshold=3.0,
-    adaptive_params=None,
+    method_kwargs=None,
 ):
     """Remove spectral line noise from EEG using ZapLine (DSS-based).
 
@@ -955,10 +965,11 @@ def compute_zapline(
     ----------
     raw : mne.io.Raw
         Continuous EEG recording.
-    noise_freqs : float | array-like | ``"europe"`` | ``"usa"`` | None
-        One or more frequencies (Hz) to remove (e.g. ``50`` or
-        ``[50, 100]``).  Accepts the string shortcuts ``"europe"``
-        (50/100/150 Hz) and ``"usa"`` (60/120/180 Hz).  For
+    noise_freqs : float | ``"europe"`` | ``"usa"`` | None
+        Fundamental line-noise frequency in Hz (e.g. ``50``).  Every method
+        removes the fundamental together with all its harmonics below
+        Nyquist, so harmonics must not be passed.  Accepts the string
+        shortcuts ``"europe"`` (50 Hz) and ``"usa"`` (60 Hz).  For
         ``method="adaptive"`` you may pass ``None`` to let ZapLine-plus
         auto-detect line-noise frequencies.
     method : str
@@ -966,67 +977,62 @@ def compute_zapline(
 
         ``"adaptive"`` (default)
             ZapLine-plus via :class:`mne_denoise.zapline.ZapLine` with
-            ``adaptive=True``.  Automatically detects noise harmonics.
-            Loops over each entry in *noise_freqs* (or runs once with
-            ``line_freq=None`` when *noise_freqs* is ``None``).
-            Requires ``mne_denoise``.
+            ``adaptive=True``.  Auto-detects the noise frequency when
+            *noise_freqs* is ``None``.  Requires ``mne_denoise``.
         ``"zapline"``
             Standard (non-adaptive) ZapLine via
             :class:`mne_denoise.zapline.ZapLine` with ``adaptive=False``.
-            Loops over each entry in *noise_freqs*.
             Requires ``mne_denoise``.
         ``"dss_line"``
             Single-pass DSS via :func:`meegkit.dss.dss_line`.
-            Loops over each entry in *noise_freqs*.
             Requires ``meegkit``.
         ``"dss_line_iter"``
             Iterative DSS via :func:`meegkit.dss.dss_line_iter`.
-            Loops over each entry in *noise_freqs*.
             Requires ``meegkit``.
-    n_remove : int
-        Number of DSS components to remove at each frequency.  Only used
-        by ``"dss_line"`` and ``"dss_line_iter"``.  Default ``1``.
-    threshold : float
-        Detection threshold for the mne-denoise methods (``"adaptive"``
-        and ``"zapline"``).  Passed as the *threshold* argument to
-        :class:`mne_denoise.zapline.ZapLine`.  Default ``3.0``.
-    adaptive_params : dict | None
-        Extra keyword arguments forwarded to
-        :class:`mne_denoise.zapline.ZapLine` when ``method="adaptive"``.
-        Useful for controlling ``process_harmonics``, ``n_iterations``,
-        etc.  ``None`` uses defaults.
+    method_kwargs : dict | None
+        Extra keyword arguments forwarded to the backend of the chosen
+        *method*: :class:`mne_denoise.zapline.ZapLine` for ``"adaptive"``
+        and ``"zapline"`` (e.g. ``threshold``, ``adaptive_params``),
+        :func:`meegkit.dss.dss_line` (e.g. ``nremove``, ``nfft``) or
+        :func:`meegkit.dss.dss_line_iter` (e.g. ``n_iter_max``).  They
+        override this function's defaults.  The sampling and line
+        frequencies are set from *raw* and *noise_freqs* and cannot be
+        passed here.  ``None`` uses defaults.
 
     Returns
     -------
     raw_clean : mne.io.Raw
         Copy of *raw* with line noise attenuated.
     """
-    import warnings as _warnings
+    method_kwargs = dict(method_kwargs or {})
 
     # ------------------------------------------------------------------
     # Resolve noise_freqs preset strings
     # ------------------------------------------------------------------
     if isinstance(noise_freqs, str):
         if noise_freqs == "europe":
-            noise_freqs = [50.0, 100.0, 150.0]
+            noise_freqs = 50.0
         elif noise_freqs == "usa":
-            noise_freqs = [60.0, 120.0, 180.0]
+            noise_freqs = 60.0
         else:
             raise ValueError(
                 f"Unknown noise_freqs preset: {noise_freqs!r}. "
-                "Use 'europe', 'usa', None (adaptive only), or an explicit "
-                "float / array-like."
+                "Use 'europe', 'usa', None (adaptive only), or a float."
             )
+    elif noise_freqs is not None:
+        if not isinstance(noise_freqs, numbers.Real) or isinstance(noise_freqs, bool):
+            raise TypeError(
+                "noise_freqs must be a float, 'europe', 'usa' or None, got "
+                f"{type(noise_freqs).__name__}. Pass only the fundamental; "
+                "harmonics are removed automatically."
+            )
+        noise_freqs = float(noise_freqs)
 
-    if noise_freqs is not None:
-        noise_freqs = np.atleast_1d(np.asarray(noise_freqs, dtype=float))
-        nyquist = raw.info["sfreq"] / 2.0
-        noise_freqs = noise_freqs[noise_freqs < nyquist]
-        if len(noise_freqs) == 0:
-            LOGGER.warning(
-                "compute_zapline: all requested freqs are above Nyquist. Skipping."
-            )
-            return raw.copy()
+    if noise_freqs is not None and noise_freqs >= raw.info["sfreq"] / 2.0:
+        LOGGER.warning(
+            f"remove_line: {noise_freqs} Hz is at or above Nyquist. Skipping."
+        )
+        return raw.copy()
 
     # ------------------------------------------------------------------
     # mne-denoise methods: "adaptive" and "zapline"
@@ -1036,7 +1042,7 @@ def compute_zapline(
             from mne_denoise.zapline import ZapLine as _ZapLine
         except ImportError:
             _warnings.warn(
-                "mne_denoise is not installed; compute_zapline cannot run "
+                "mne_denoise is not installed; remove_line cannot run "
                 f"method={method!r}. Install with: pip install mne-denoise",
                 ImportWarning,
                 stacklevel=2,
@@ -1044,35 +1050,23 @@ def compute_zapline(
             return raw.copy()
 
         is_adaptive = method == "adaptive"
-        raw_clean = raw.copy()
-
-        # Determine which line_freq values to iterate over
-        if noise_freqs is None:
-            # Adaptive auto-detection - run once
-            freqs_to_run = [None]
-        else:
-            freqs_to_run = list(noise_freqs)
-
-        for freq in freqs_to_run:
-            freq_label = "auto" if freq is None else f"{freq} Hz"
-            mode_label = "adaptive" if is_adaptive else "standard"
-            LOGGER.info(
-                f"ZapLine ({mode_label}): removing {freq_label} noise "
-                f"(threshold={threshold})"
+        if noise_freqs is None and not is_adaptive:
+            raise ValueError(
+                "noise_freqs cannot be None for method='zapline'. Provide a "
+                "frequency or use method='adaptive' for auto-detection."
             )
-            zap_kwargs: dict = dict(
-                sfreq=raw_clean.info["sfreq"],
-                line_freq=freq,
-                n_remove="auto",
-                threshold=threshold,
-                adaptive=is_adaptive,
-            )
-            if is_adaptive and adaptive_params:
-                zap_kwargs["adaptive_params"] = adaptive_params
-            zap = _ZapLine(**zap_kwargs)
-            raw_clean = zap.fit_transform(raw_clean)
-
-        return raw_clean
+        freq_label = "auto" if noise_freqs is None else f"{noise_freqs} Hz"
+        mode_label = "adaptive" if is_adaptive else "standard"
+        LOGGER.info(f"ZapLine ({mode_label}): removing {freq_label} noise")
+        _check_reserved_kwargs(method_kwargs, ("sfreq", "line_freq", "adaptive"))
+        zap_kwargs = {"n_select": "auto", **method_kwargs}
+        zap = _ZapLine(
+            sfreq=raw.info["sfreq"],
+            line_freq=noise_freqs,
+            adaptive=is_adaptive,
+            **zap_kwargs,
+        )
+        return zap.fit_transform(raw.copy())
 
     # ------------------------------------------------------------------
     # meegkit methods: "dss_line" and "dss_line_iter"
@@ -1081,7 +1075,7 @@ def compute_zapline(
         if noise_freqs is None:
             raise ValueError(
                 "noise_freqs cannot be None for method='dss_line' or "
-                "'dss_line_iter'. Provide explicit frequencies or use "
+                "'dss_line_iter'. Provide a frequency or use "
                 "method='adaptive' for auto-detection."
             )
         try:
@@ -1089,7 +1083,7 @@ def compute_zapline(
             from meegkit.dss import dss_line_iter as _dss_line_iter
         except ImportError:
             _warnings.warn(
-                "meegkit is not installed; compute_zapline cannot run "
+                "meegkit is not installed; remove_line cannot run "
                 f"method={method!r}. Install with: pip install meegkit",
                 ImportWarning,
                 stacklevel=2,
@@ -1100,35 +1094,23 @@ def compute_zapline(
         raw_clean = raw.copy()
         data = raw_clean.get_data(picks=eeg_idx).T  # (n_times, n_channels)
 
-        for freq in noise_freqs:
-            LOGGER.info(
-                f"ZapLine ({method}): removing {freq} Hz noise "
-                f"({n_remove} component(s))"
-            )
-            if method == "dss_line":
-                # nremove controls how many DSS components to zero out
-                result = _dss_line(
-                    data,
-                    fline=freq,
-                    sfreq=raw.info["sfreq"],
-                    nfft=int(raw.info["sfreq"]),
-                    nremove=n_remove,
-                )
-            else:  # dss_line_iter
-                # Iterative method - number of removed components is automatic
-                result = _dss_line_iter(
-                    data,
-                    fline=freq,
-                    sfreq=raw.info["sfreq"],
-                )
-            # dss_line returns (y, artifact, n_iter); dss_line_iter returns (y, n_iter)
-            data = result[0]
-
-        raw_clean._data[eeg_idx] = data.T
+        LOGGER.info(f"ZapLine ({method}): removing {noise_freqs} Hz noise")
+        _check_reserved_kwargs(method_kwargs, ("fline", "sfreq"))
+        if method == "dss_line":
+            dss_kwargs = {"nfft": int(raw.info["sfreq"]), **method_kwargs}
+            dss_func = _dss_line
+        else:  # dss_line_iter
+            dss_kwargs = method_kwargs
+            dss_func = _dss_line_iter
+        result = dss_func(
+            data, fline=noise_freqs, sfreq=raw.info["sfreq"], **dss_kwargs
+        )
+        # dss_line returns (y, artifact, n_iter); dss_line_iter returns (y, n_iter)
+        raw_clean._data[eeg_idx] = result[0].T
         return raw_clean
 
     raise ValueError(
-        f"Unknown zapline method: {method!r}. "
+        f"Unknown line-noise method: {method!r}. "
         "Choose from 'adaptive', 'zapline', 'dss_line', 'dss_line_iter'."
     )
 
