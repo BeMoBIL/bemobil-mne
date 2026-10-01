@@ -56,7 +56,7 @@ Quick start
    preprocessor = EEGPreprocessor(
        loader=loader,
        line_noise_freq="europe",   # 50 Hz + harmonics up to Nyquist
-       zapline_method="adaptive",  # ZapLine-Plus before filtering
+       line_noise_method="adaptive",  # ZapLine-Plus before filtering
    )
    raw_clean, report, metadata = preprocessor.run_raw(raw, fname_out="sub-01_clean.fif.gz")
 

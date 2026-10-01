@@ -23,11 +23,11 @@ from bemobil_mne.preproc.utils import (
     append_desc,
     compute_asr,
     compute_ica,
-    compute_zapline,
     detect_bad_by_line_noise,
     fit_dipoles_on_ica,
     get_raw_subset,
     init_descriptor,
+    remove_line,
     set_descriptor,
     sig_params,
 )
@@ -299,12 +299,13 @@ class EEGPreprocessor:
         - ``"europe"``: shortcut for 50 Hz (default).
         - ``"usa"``: shortcut for 60 Hz.
 
-        The resulting harmonic array is used both by the ZapLine spectral
-        cleaning step (when *zapline_method* is not ``None``) and by
-        :func:`get_bad_chs` for notch-filtered bad-channel detection.
-    zapline_method : str | None
+        The fundamental is passed to the line-noise removal step
+        (when *line_noise_method* is not ``None``), which removes its harmonics
+        itself; the full harmonic array is used by :func:`get_bad_chs` for
+        notch-filtered bad-channel detection.
+    line_noise_method : str | None
         DSS-based spectral cleaning algorithm applied before bandpass
-        filtering.  ``None`` skips ZapLine entirely.  Default is
+        filtering.  ``None`` skips line-noise removal.  Default is
         ``"adaptive"`` (matching BeMoBIL).  One of:
 
         ``"adaptive"``
@@ -315,6 +316,11 @@ class EEGPreprocessor:
             Single-pass DSS (meegkit).
         ``"dss_line_iter"``
             Iterative DSS (meegkit).
+    line_noise_kwargs : dict | None
+        Extra keyword arguments forwarded to the backend of
+        *line_noise_method* via :func:`remove_line`'s *method_kwargs*
+        (e.g. ``{"threshold": 4.0}`` for ZapLine or ``{"nremove": 2}`` for
+        ``"dss_line"``).  ``None`` uses defaults.
     get_bad_chs_kwargs : dict | None
         Extra keyword arguments forwarded to :func:`get_bad_chs`.  Supported
         keys (all optional):
@@ -437,7 +443,8 @@ class EEGPreprocessor:
         rename_channels=None,
         pre_hook: object = None,
         line_noise_freq: float | str = "europe",
-        zapline_method: str | None = "adaptive",
+        line_noise_method: str | None = "adaptive",
+        line_noise_kwargs: dict | None = None,
         get_bad_chs_kwargs: dict | None = None,
         annotate_breaks: bool = False,
         annotate_break_kwargs: dict | None = None,
@@ -492,7 +499,8 @@ class EEGPreprocessor:
         self.rename_channels = rename_channels
         self.pre_hook = pre_hook
         self.line_noise_freq = line_noise_freq
-        self.zapline_method = zapline_method
+        self.line_noise_method = line_noise_method
+        self.line_noise_kwargs = line_noise_kwargs or {}
         self.get_bad_chs_kwargs = get_bad_chs_kwargs or {}
         self.annotate_breaks = annotate_breaks
         self.annotate_break_kwargs = annotate_break_kwargs
@@ -656,22 +664,23 @@ class EEGPreprocessor:
             if pre_hook_description:
                 append_desc(raw, name="pre_hook", description=pre_hook_description)
 
-        # --- ZapLine spectral cleaning ---
-        if self.zapline_method is not None:
+        # --- Line-noise removal ---
+        if self.line_noise_method is not None:
             t0 = time.perf_counter()
-            zapline_freqs = _expand_line_noise_freq(
-                self.line_noise_freq, raw.info["sfreq"]
-            )
-            raw = compute_zapline(
-                raw, noise_freqs=zapline_freqs, method=self.zapline_method
+            raw = remove_line(
+                raw,
+                noise_freqs=self.line_noise_freq,
+                method=self.line_noise_method,
+                method_kwargs=self.line_noise_kwargs,
             )
             append_desc(
                 raw,
-                name="zapline",
-                method=self.zapline_method,
-                noise_freqs=zapline_freqs.tolist(),
+                name="remove_line",
+                method=self.line_noise_method,
+                noise_freqs=self.line_noise_freq,
+                method_kwargs=self.line_noise_kwargs,
             )
-            timer.log_step("zapline", time.perf_counter() - t0)
+            timer.log_step("remove_line", time.perf_counter() - t0)
 
         # --- Bad channel detection ---
         t0 = time.perf_counter()

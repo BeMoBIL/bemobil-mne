@@ -115,16 +115,16 @@ def test_eegpreprocessor_instantiation():
 
 
 def test_eegpreprocessor_custom_params():
-    """Accept custom filter_bands, line_noise_freq, and zapline_method."""
+    """Accept custom filter_bands, line_noise_freq, and line_noise_method."""
     proc = EEGPreprocessor(
         loader=None,
         filter_bands=(1.0, 80.0),
         line_noise_freq=50.0,
-        zapline_method="dss_line",
+        line_noise_method="dss_line",
         fit_ica=False,
     )
     assert proc.filter_bands == (1.0, 80.0)
-    assert proc.zapline_method == "dss_line"
+    assert proc.line_noise_method == "dss_line"
 
 
 def test_eegpreprocessor_skip_if_exists(tmp_path):
@@ -153,7 +153,7 @@ def test_eegpreprocessor_full_run_no_dipoles(tmp_path, sample_raw):
         loader=None,
         filter_bands=(1.0, 40.0),
         line_noise_freq=60.0,
-        zapline_method="dss_line",
+        line_noise_method="dss_line",
         fit_ica=True,
         ica_method="picard",
         fit_dipoles=False,

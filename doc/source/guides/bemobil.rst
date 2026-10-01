@@ -37,7 +37,7 @@ Overview
      - ``mne-icalabel``
    * - Line-noise removal
      - ZapLine-Plus (auto-detect)
-     - ZapLine-Plus via ``mne-denoise`` (``zapline_method="adaptive"``)
+     - ZapLine-Plus via ``mne-denoise`` (``line_noise_method="adaptive"``)
    * - Bad channel detection
      - ``clean_rawdata`` (ASR-based correlation)
      - PyPREP + FASTER + optional line-noise / flatline criteria
@@ -77,7 +77,7 @@ The following preprocessing parameters are set to match the original MATLAB impl
      - ``filter_bands_ica=(1.75, None)``
    * - ZapLine mode
      - auto-detect (``noisefreqs=[]``)
-     - ``zapline_method="adaptive"``
+     - ``line_noise_method="adaptive"``
    * - ICLabel decision rule
      - popularity vote (``iclabel_threshold=-1``)
      - ``thresh=-1``
@@ -162,7 +162,7 @@ The following script replicates the core BeMoBIL EEG preprocessing steps using B
    preprocessor = EEGPreprocessor(
        loader=loader,
        line_noise_freq="europe",      # 50 Hz; use "usa" for 60 Hz
-       zapline_method="adaptive",     # zaplineConfig.noisefreqs = []
+       line_noise_method="adaptive",  # zaplineConfig.noisefreqs = []
        filter_bands=(0.1, 100.0),     # broad bandpass (BeMoBIL keeps full band)
        filter_bands_ica=(1.75, None), # filter_lowCutoffFreqAMICA = 1.75
        downsample_ica=250.0,          # resample_freq = 250

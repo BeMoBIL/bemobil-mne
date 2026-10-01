@@ -24,7 +24,7 @@ from bemobil_mne.preproc.utils import (
     compute_dipolarity,
     compute_ica,
     compute_mi_reduction,
-    compute_zapline,
+    remove_line,
     detect_bad_by_line_noise,
     fit_dipoles_on_ica,
     format_duration,
@@ -46,7 +46,7 @@ __all__ = [
     # Preprocessing functions
     "get_bad_chs",
     "compute_asr",
-    "compute_zapline",
+    "remove_line",
     "compute_ica",
     "fit_dipoles_on_ica",
     "compute_dipolarity",
