@@ -338,6 +338,7 @@ class XDFLoader:
         in the output rather than bridged.  ``None`` fills all gaps.
     on_mismatch : {'crop', 'pad'}
         Behaviour when auxiliary streams do not fully cover the EEG time range.
+        Defaults to ``'pad'``.  Options:
 
         ``'crop'`` -- trim the recording to the intersection of all Tier-1
         stream time ranges.  Safe when losing a few edge seconds is acceptable.
@@ -366,7 +367,7 @@ class XDFLoader:
         ] = "pchip",
         dejitter_timestamps: bool = False,
         max_nan_gap_s: float | None = None,
-        on_mismatch: Literal["crop", "pad"] = "crop",
+        on_mismatch: Literal["crop", "pad"] = "pad",
     ):
         self.eeg_stream_name = eeg_stream_name
         self.eeg_stream_type = eeg_stream_type
