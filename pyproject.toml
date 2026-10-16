@@ -111,6 +111,10 @@ parallel = true
 [tool.coverage.report]
 exclude_lines = ["if 0:", "if __name__ == .__main__.:", "pragma: no cover"]
 
+[tool.ruff]
+# Markdown code blocks are hand-formatted documentation
+extend-exclude = ["*.md"]
+
 [tool.ruff.lint]
 exclude = ["__init__.py"]
 select = ["A", "D", "E", "F", "I", "UP", "W"]
