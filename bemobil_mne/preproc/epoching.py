@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from pathlib import Path
 
 import mne
+import numpy as np
+
+LOGGER = logging.getLogger(__name__)
 
 
 def get_stimulus_rename_map(
@@ -54,9 +58,10 @@ def get_stimulus_rename_map(
             label = f"{condition_match.group(1)}/{stimulus_match.group(1)}"
             rename_map[desc] = label
 
-    print("Discovered event types:")
-    for label, id_ in label_to_id.items():
-        print(f"  {id_}: {label}")
+    LOGGER.info(
+        "Discovered event types: "
+        + ", ".join(f"{id_}: {label}" for label, id_ in label_to_id.items())
+    )
 
     return rename_map, label_to_id
 
@@ -81,9 +86,15 @@ class EpochPreparer:
     bandpass_erp : tuple of (float | None, float | None)
         ``(l_freq, h_freq)`` bandpass applied before epoching.
     tshift : float
-        Stimulus onset delay in seconds.  Annotation onsets are shifted
-        forward by this amount so that ``t=0`` aligns with actual stimulus
-        presentation.  Set to ``0`` to disable.
+        Stimulus onset delay in seconds.  Event annotation onsets are
+        shifted forward by this amount so that ``t=0`` aligns with actual
+        stimulus presentation; ``BAD_*`` / ``EDGE`` annotations are not
+        shifted.  Set to ``0`` to disable.
+
+    Notes
+    -----
+    ``BAD_*`` annotations (e.g. breaks or missing auxiliary data) are kept,
+    so epochs overlapping them are rejected by :class:`mne.Epochs`.
     """
 
     def __init__(
@@ -116,7 +127,8 @@ class EpochPreparer:
         raw_clean : mne.io.BaseRaw
             ICA-cleaned raw recording that still carries all annotations.
         fname_out : str | Path
-            Output stem; ``_epo.fif.gz`` is appended automatically.
+            Output stem; ``_epo.fif.gz`` is appended automatically (a
+            trailing ``.fif`` / ``.fif.gz`` is removed first).
         cond : str
             Condition key that must exist in ``self.remaps``.
         overwrite : bool
@@ -125,29 +137,58 @@ class EpochPreparer:
         Returns
         -------
         epochs_dict : dict[str, mne.Epochs]
-            ``{label: epochs}`` for each target label in the condition remap.
+            ``{label: epochs}`` for each target label in the condition remap
+            that occurs in the data (missing labels are logged and skipped).
         """
-        fname_out = Path(fname_out).with_suffix("")
+        fname_out = Path(fname_out)
+        for ext in (".fif.gz", ".fif"):
+            if fname_out.name.endswith(ext):
+                fname_out = fname_out.with_name(fname_out.name[: -len(ext)])
+                break
         remap = self.remaps[cond]
+        targets = list(dict.fromkeys(remap.values()))
 
         rename_map, _ = get_stimulus_rename_map(raw_clean.annotations.description)
 
-        raw_remap = raw_clean.copy()
+        raw_remap = raw_clean.copy().load_data()
         raw_remap.annotations.rename(rename_map)
-        raw_remap.annotations.rename(remap)
+        present = set(raw_remap.annotations.description)
+        raw_remap.annotations.rename({k: v for k, v in remap.items() if k in present})
+
+        descriptions = [str(d) for d in raw_remap.annotations.description]
+        is_event = np.isin(descriptions, targets)
 
         if self.tshift != 0:
             shifted = raw_remap.annotations.copy()
-            shifted.onset += self.tshift
+            shifted.onset[is_event] += self.tshift
             raw_remap.set_annotations(shifted)
 
         raw_remap.filter(l_freq=self.bandpass_erp[0], h_freq=self.bandpass_erp[1])
 
-        mask = [a in remap.values() for a in raw_remap.annotations.description]
-        raw_remap.set_annotations(raw_remap.annotations[mask])
+        # Keep the events of interest and the BAD_ segments (needed for
+        # reject_by_annotation); drop every other annotation. The masks are
+        # recomputed because shifting onsets can re-sort the annotations.
+        descriptions = [str(d) for d in raw_remap.annotations.description]
+        is_event = np.isin(descriptions, targets)
+        is_bad = np.array(
+            [d.lower().startswith(("bad", "edge")) for d in descriptions], dtype=bool
+        )
+        raw_remap.set_annotations(raw_remap.annotations[is_event | is_bad])
+        if not is_event.any():
+            raise ValueError(
+                f"Condition '{cond}': none of the events {targets} were found "
+                "in the annotations."
+            )
 
-        events, ids = mne.events_from_annotations(raw_remap)
-        id_of_interest = {ev: ids[ev] for ev in remap.values()}
+        events, ids = mne.events_from_annotations(
+            raw_remap, event_id={t: i + 1 for i, t in enumerate(targets)}
+        )
+        missing = [t for t in targets if t not in ids]
+        if missing:
+            LOGGER.warning(
+                f"Condition '{cond}': no events found for {missing}; skipped."
+            )
+        id_of_interest = {t: ids[t] for t in targets if t in ids}
 
         epochs = mne.Epochs(
             raw_remap,
@@ -163,4 +204,4 @@ class EpochPreparer:
             fname_out.with_name(fname_out.name + "_epo.fif.gz"), overwrite=overwrite
         )
 
-        return {label: epochs[label] for label in remap.values()}
+        return {label: epochs[label] for label in id_of_interest}
