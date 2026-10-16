@@ -182,3 +182,18 @@ def test_batch_export_with_session_and_run(tmp_path):
     results = batch_export_to_bids(runs, bids_root=tmp_path, verbose=False)
     assert len(results) == 2
     assert {r.run for r in results} == {"01", "02"}
+
+
+def test_export_to_bids_records_provenance_on_input(tiny_raw_with_montage, tmp_path):
+    """The BIDS export step is recorded in the caller's descriptor."""
+    from bemobil_mne.preproc.utils import (
+        get_descriptor,
+        init_descriptor,
+        set_descriptor,
+    )
+
+    raw = tiny_raw_with_montage
+    set_descriptor(raw, init_descriptor())
+    export_to_bids(raw, tmp_path, subject="01", verbose=False)
+    steps = [s["name"] for s in get_descriptor(raw)["steps"]]
+    assert steps == ["bids_export"]

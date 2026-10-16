@@ -124,15 +124,18 @@ For example, aligning ECG from 1000 Hz to a 500 Hz common grid without
 filtering would allow energy in the 250-500 Hz band to alias onto 0-250 Hz,
 corrupting the cardiac waveform. The anti-aliasing step removes this.
 
-Implementation: an 8th-order zero-phase Butterworth (`scipy.signal.filtfilt`)
+Implementation: an 8th-order zero-phase Butterworth (`scipy.signal.sosfiltfilt`)
 with cutoff at 90 % of the target Nyquist. The Butterworth design [3] maximises
 passband flatness (no ripple), which is important when preserving signal
 amplitude across physiological frequency bands. An 8th-order filter gives
 roughly 48 dB/octave rolloff - sufficient to attenuate aliases before they
 fold back - while remaining numerically stable. The 10 % guard margin below
 Nyquist provides a transition band and avoids ringing at the exact cutoff.
-Zero-phase filtering via `filtfilt` (forward + backward pass) eliminates
-phase distortion, which is critical for preserving event-related latencies [4].
+Zero-phase filtering via `sosfiltfilt` (forward + backward pass, in
+second-order sections for numerical stability) eliminates phase distortion,
+which is critical for preserving event-related latencies [4]. NaN left at the
+stream edges are padded with the nearest valid value for filtering and
+restored afterwards, so they do not spread through the channel.
 
 **Use when**: the source stream has a higher native rate than `target_sfreq`
 (ECG at 1000 Hz -> 500 Hz, eye-tracking at 600 Hz -> 500 Hz).
@@ -198,7 +201,7 @@ controls which gaps are filled:
 - Gaps **shorter** than `max_nan_gap_s` are bridged (e.g. single blink ~200 ms)
 - Gaps **longer** than `max_nan_gap_s` are filled temporarily so the
   interpolation can proceed, but the corresponding intervals are re-applied
-  as NaN in the aligned output
+  as NaN in the aligned output, for each channel separately
 
 Because MNE `RawArray` does not accept NaN data, zero is substituted for
 missing regions in the Raw object and `BAD_<label>_missing` annotations are
@@ -225,7 +228,8 @@ ECG amplifier connects 2 seconds after EEG acquisition begins:
 ## The `session_t0` anchor
 
 All temporal outputs share a common origin: `session_t0`, the absolute LSL
-timestamp of sample 0 in the Raw object.
+timestamp of the first EEG sample kept in the Raw object (sample 0). Auxiliary
+Tier-1 streams are evaluated at the actual EEG sample timestamps.
 
 - Raw object: t = 0 corresponds to `session_t0`
 - Tier-2 timestamps: already relative to `session_t0` (subtract on load)
@@ -248,29 +252,26 @@ loader = XDFLoader(
     montage="standard_1005",
     drop_channels=["x_dir", "y_dir", "z_dir"],
     target_sfreq=500.0,
-
     # Tier-1: align ECG and gaze into the Raw object
     # "method" overrides alignment_method for that stream only
     special_streams={
-        "ecg":        {"type": "ECG",  "method": "sinc"},   # downsampling 1000->500 Hz
-        "gaze":       {"type": "Gaze", "method": "pchip"},  # upsampling 200->500 Hz
-        "button_box": {"type": "EXG",  "method": "stim"},   # trigger channel
+        "ecg": {"type": "ECG", "method": "sinc"},  # downsampling 1000->500 Hz
+        "gaze": {"type": "Gaze", "method": "pchip"},  # upsampling 200->500 Hz
+        "button_box": {"type": "EXG", "method": "stim"},  # trigger channel
     },
-
     # Tier-2: keep audio at native 44.1 kHz for TF analysis
     tier2_streams={
         "audio": {"type": "Audio"},
     },
-
-    alignment_method="sinc",   # downsampling streams (e.g. ECG/EMG at 1000 Hz -> 500 Hz)
-    max_nan_gap_s=0.5,         # preserve signal gaps longer than 500 ms as NaN
-    on_mismatch="pad",         # keep full EEG range
+    alignment_method="sinc",  # downsampling streams (e.g. ECG/EMG at 1000 Hz -> 500 Hz)
+    max_nan_gap_s=0.5,  # preserve signal gaps longer than 500 ms as NaN
+    on_mismatch="pad",  # keep full EEG range
 )
 
 rec = loader.load("session.xdf")
 
 # Tier-1 data  -  all physiology at 500 Hz
-raw = rec.raw                          # mne.io.RawArray
+raw = rec.raw  # mne.io.RawArray
 
 # Tier-2 data  -  audio at 44 100 Hz
 audio, audio_ts = rec.tier2["audio"]  # (n_samples, n_ch), timestamps in seconds
@@ -292,10 +293,10 @@ from bemobil_mne.io import align_stream_to_timestamps
 
 # Align any (data, timestamps) pair to a target grid
 aligned = align_stream_to_timestamps(
-    data=my_data,          # (n_samples, n_channels)
+    data=my_data,  # (n_samples, n_channels)
     src_ts=my_timestamps,  # LSL timestamps
-    tgt_ts=target_grid,    # target timestamp array
-    method="sinc",         # AA filter + PCHIP
+    tgt_ts=target_grid,  # target timestamp array
+    method="sinc",  # AA filter + PCHIP
     max_nan_gap_s=0.3,
 )
 ```

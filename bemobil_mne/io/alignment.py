@@ -98,10 +98,11 @@ def _handle_nan_gaps(
     Returns
     -------
     filled_data : (n_samples, n_channels)
-    long_gap_intervals : list of (t_start, t_end) in absolute LSL time
+    long_gap_intervals : list of (t_start, t_end, channel)
+        Long gaps in absolute LSL time, recorded for every channel.
     """
     filled = data.copy().astype(float)
-    long_gap_intervals: list[tuple[float, float]] = []
+    long_gap_intervals: list[tuple[float, float, int]] = []
 
     for ch in range(data.shape[1]):
         col = filled[:, ch]
@@ -119,13 +120,14 @@ def _handle_nan_gaps(
         run_starts = np.concatenate([[nan_indices[0]], nan_indices[breaks]])
         run_ends = np.concatenate([nan_indices[breaks - 1], [nan_indices[-1]]])
 
-        # Record long gaps once (channel 0) to avoid duplicates across channels
-        if ch == 0 and max_gap_s is not None:
+        # Record long gaps per channel: channels can lose signal
+        # independently (e.g. one eye of a binocular tracker).
+        if max_gap_s is not None:
             for rs, re in zip(run_starts, run_ends):
                 gap_duration = timestamps[re] - timestamps[rs]
                 if gap_duration > max_gap_s:
                     long_gap_intervals.append(
-                        (float(timestamps[rs]), float(timestamps[re]))
+                        (float(timestamps[rs]), float(timestamps[re]), ch)
                     )
 
         # Interpolate across NaN runs
@@ -161,7 +163,7 @@ def _apply_antialiasing(
 
     Only applied when ``tgt_sfreq < src_sfreq``.  The 10 % guard margin below
     Nyquist provides a transition band that prevents ringing at the exact
-    cutoff.  An 8th-order zero-phase Butterworth (``filtfilt``) gives
+    cutoff.  An 8th-order zero-phase Butterworth (``sosfiltfilt``) gives
     ~48 dB/octave rolloff with a maximally flat passband and no phase
     distortion [Butterworth 1930; Widmann et al. 2015].  Zero-phase
     (forward + backward) filtering preserves event-related latencies, which
@@ -170,8 +172,25 @@ def _apply_antialiasing(
     if tgt_sfreq >= src_sfreq:
         return data
     cutoff_ratio = min((tgt_sfreq / 2.0 * 0.9) / (src_sfreq / 2.0), 0.99)
-    b, a = scipy.signal.butter(order, cutoff_ratio, btype="low")
-    return scipy.signal.filtfilt(b, a, data, axis=0)
+    # Second-order sections stay numerically stable for high orders and
+    # small cutoff ratios, where the (b, a) form can blow up.
+    sos = scipy.signal.butter(order, cutoff_ratio, btype="low", output="sos")
+
+    # NaN would spread through the whole channel in sosfiltfilt; fill the
+    # remaining NaN (stream edges, all-NaN channels) temporarily with the
+    # nearest valid value and restore them afterwards.
+    nan_mask = np.isnan(data)
+    work = data.copy()
+    for ch in np.where(nan_mask.any(axis=0))[0]:
+        valid = ~nan_mask[:, ch]
+        if valid.any():
+            idx = np.arange(len(work))
+            work[:, ch] = np.interp(idx, idx[valid], work[valid, ch])
+        else:
+            work[:, ch] = 0.0
+    filtered = scipy.signal.sosfiltfilt(sos, work, axis=0)
+    filtered[nan_mask] = np.nan
+    return filtered
 
 
 # ---------------------------------------------------------------------------
@@ -351,7 +370,7 @@ def align_stream_to_timestamps(
         return _align_stim_channels(data, src_ts, tgt_ts, fill_value=stim_fill)
 
     # 1. Fill NaN gaps in source; track long ones for re-application
-    long_gap_intervals: list[tuple[float, float]] = []
+    long_gap_intervals: list[tuple[float, float, int]] = []
     if np.isnan(data).any():
         data, long_gap_intervals = _handle_nan_gaps(
             data, src_ts, method=nan_gap_method, max_gap_s=max_nan_gap_s
@@ -391,8 +410,8 @@ def align_stream_to_timestamps(
         aligned[:, ch] = vals
 
     # 4. Re-apply NaN for long gaps that should stay missing
-    for t_start, t_end in long_gap_intervals:
+    for t_start, t_end, ch in long_gap_intervals:
         gap_mask = (tgt_ts >= t_start) & (tgt_ts <= t_end)
-        aligned[gap_mask, :] = np.nan
+        aligned[gap_mask, ch] = np.nan
 
     return aligned
