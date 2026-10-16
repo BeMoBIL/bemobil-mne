@@ -252,29 +252,26 @@ loader = XDFLoader(
     montage="standard_1005",
     drop_channels=["x_dir", "y_dir", "z_dir"],
     target_sfreq=500.0,
-
     # Tier-1: align ECG and gaze into the Raw object
     # "method" overrides alignment_method for that stream only
     special_streams={
-        "ecg":        {"type": "ECG",  "method": "sinc"},   # downsampling 1000->500 Hz
-        "gaze":       {"type": "Gaze", "method": "pchip"},  # upsampling 200->500 Hz
-        "button_box": {"type": "EXG",  "method": "stim"},   # trigger channel
+        "ecg": {"type": "ECG", "method": "sinc"},  # downsampling 1000->500 Hz
+        "gaze": {"type": "Gaze", "method": "pchip"},  # upsampling 200->500 Hz
+        "button_box": {"type": "EXG", "method": "stim"},  # trigger channel
     },
-
     # Tier-2: keep audio at native 44.1 kHz for TF analysis
     tier2_streams={
         "audio": {"type": "Audio"},
     },
-
-    alignment_method="sinc",   # downsampling streams (e.g. ECG/EMG at 1000 Hz -> 500 Hz)
-    max_nan_gap_s=0.5,         # preserve signal gaps longer than 500 ms as NaN
-    on_mismatch="pad",         # keep full EEG range
+    alignment_method="sinc",  # downsampling streams (e.g. ECG/EMG at 1000 Hz -> 500 Hz)
+    max_nan_gap_s=0.5,  # preserve signal gaps longer than 500 ms as NaN
+    on_mismatch="pad",  # keep full EEG range
 )
 
 rec = loader.load("session.xdf")
 
 # Tier-1 data  -  all physiology at 500 Hz
-raw = rec.raw                          # mne.io.RawArray
+raw = rec.raw  # mne.io.RawArray
 
 # Tier-2 data  -  audio at 44 100 Hz
 audio, audio_ts = rec.tier2["audio"]  # (n_samples, n_ch), timestamps in seconds
@@ -296,10 +293,10 @@ from bemobil_mne.io import align_stream_to_timestamps
 
 # Align any (data, timestamps) pair to a target grid
 aligned = align_stream_to_timestamps(
-    data=my_data,          # (n_samples, n_channels)
+    data=my_data,  # (n_samples, n_channels)
     src_ts=my_timestamps,  # LSL timestamps
-    tgt_ts=target_grid,    # target timestamp array
-    method="sinc",         # AA filter + PCHIP
+    tgt_ts=target_grid,  # target timestamp array
+    method="sinc",  # AA filter + PCHIP
     max_nan_gap_s=0.3,
 )
 ```

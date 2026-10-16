@@ -271,6 +271,13 @@ def _marker_descriptions(time_series) -> list[str]:
     return out
 
 
+def _read_montage_file(path: Path) -> mne.channels.DigMontage:
+    """Read a montage file; FIF montages need read_dig_fif."""
+    if path.name.endswith((".fif", ".fif.gz")):
+        return mne.channels.read_dig_fif(path)
+    return mne.channels.read_custom_montage(path)
+
+
 def _crop_stream(
     stream: dict, start_time: float, end_time: float
 ) -> tuple[np.ndarray, np.ndarray]:
@@ -325,7 +332,9 @@ class XDFLoader:
         Same format as ``special_streams`` (``"method"`` key is ignored here).
         Examples: audio at 44.1 kHz, video stream.
     montage : str, Path, or DigMontage, optional
-        Montage applied to EEG channels.
+        Montage applied to EEG channels: a :class:`~mne.channels.DigMontage`,
+        a file (any format :func:`mne.channels.read_custom_montage` reads,
+        or a ``.fif`` montage) or the name of a built-in standard montage.
     old_reference : str, optional
         Reference channel to restore before setting montage (e.g. ``"FCz"``).
     keep_channels : list[str], optional
@@ -701,21 +710,21 @@ class XDFLoader:
         """Resolve and apply montage."""
         if isinstance(self.montage, mne.channels.DigMontage):
             logger.info("Using provided DigMontage object")
-            raw.set_montage(self.montage, on_missing="warn")
-        elif isinstance(self.montage, pathlib.Path):
+            montage = self.montage
+        elif isinstance(self.montage, pathlib.Path) or (
+            isinstance(self.montage, str) and Path(self.montage).exists()
+        ):
             logger.info("Using custom montage from %s", self.montage)
-            raw.set_montage(
-                mne.channels.read_custom_montage(self.montage), on_missing="warn"
-            )
+            montage = _read_montage_file(Path(self.montage))
         elif isinstance(self.montage, str):
-            p = Path(self.montage)
-            if p.exists():
-                logger.info("Using custom montage from %s", self.montage)
-                montage = mne.channels.read_custom_montage(str(p))
-            else:
-                logger.info("Using standard montage '%s'", self.montage)
-                montage = mne.channels.make_standard_montage(self.montage)
-            raw.set_montage(montage, on_missing="warn")
+            logger.info("Using standard montage '%s'", self.montage)
+            montage = mne.channels.make_standard_montage(self.montage)
+        else:
+            raise TypeError(
+                "montage must be a DigMontage, a path or the name of a standard "
+                f"montage, got {type(self.montage).__name__}."
+            )
+        raw.set_montage(montage, on_missing="warn")
 
     def _apply_channel_selection(self, raw: mne.io.BaseRaw) -> None:
         """Drop/keep channels by name or channel type."""

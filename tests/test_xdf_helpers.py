@@ -298,3 +298,31 @@ def test_build_raw_missing_annotation_covers_last_sample(eeg_stream):
     raw, _, _, _ = loader._build_raw([eeg_stream, gaze])
     (onset,), (duration,) = raw.annotations.onset, raw.annotations.duration
     assert onset + duration == pytest.approx(raw.times[-1] + 1 / 500)
+
+
+@pytest.mark.parametrize("kind", ["fif", "elc", "name", "object"])
+def test_set_montage_sources(tmp_path, kind):
+    """Montages can be given as FIF/ELC files, standard names or objects."""
+    import mne
+
+    montage = mne.channels.make_standard_montage("easycap-M1")
+    raw = mne.io.RawArray(
+        np.zeros((2, 10)), mne.create_info(["Cz", "Pz"], 100.0, "eeg")
+    )
+    if kind == "fif":
+        spec = tmp_path / "cap-dig.fif"
+        montage.save(spec)
+    elif kind == "elc":
+        spec = str(tmp_path / "cap.elc")
+        pos = montage.get_positions()["ch_pos"]
+        lines = ["NumberPositions= 2", "UnitPosition m", "Positions"]
+        lines += [" ".join(map(str, pos[ch])) for ch in ("Cz", "Pz")]
+        lines += ["Labels", "Cz", "Pz"]
+        (tmp_path / "cap.elc").write_text("\n".join(lines) + "\n")
+    elif kind == "name":
+        spec = "easycap-M1"
+    else:
+        spec = montage
+    XDFLoader(montage=spec)._set_montage(raw)
+    got = raw.get_montage().get_positions()["ch_pos"]
+    assert set(got) == {"Cz", "Pz"}
