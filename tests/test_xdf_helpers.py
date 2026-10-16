@@ -1,14 +1,16 @@
-"""Tests for bemobil_mne.io.xdf private helpers."""
+"""Tests for bemobil_mne.io.xdf."""
 
 # %% Imports
 
 import logging
 
+import numpy as np
 import pytest
 
 from bemobil_mne.io.xdf import (
     _FIF_CH_ABBREVIATIONS,
     _FIF_MAX_CH_LEN,
+    XDFLoader,
     _match_stream,
     _shorten_fif_ch_names,
     _unit_scale,
@@ -198,3 +200,101 @@ def test_match_stream_multiple_warns_and_returns_first(caplog):
         result = _match_stream(streams, name="EEG")
     assert result is not None
     assert "Multiple" in caplog.text
+
+
+# %% XDFLoader._build_raw with synthetic streams
+
+
+def _stream(name, stype, ts, data, srate, labels=None, units=None, ch_type="misc"):
+    data = data if isinstance(data, list) else np.asarray(data)
+    n_ch = len(data[0]) if len(data) else 1
+    info = {
+        "name": [name],
+        "type": [stype],
+        "source_id": [name],
+        "nominal_srate": [str(srate)],
+        "effective_srate": float(srate),
+        "channel_count": [str(n_ch)],
+        "desc": [None],
+    }
+    if labels:
+        units = units or ["NA"] * len(labels)
+        chans = [
+            {"label": [lab], "type": [ch_type], "unit": [u]}
+            for lab, u in zip(labels, units)
+        ]
+        info["desc"] = [{"channels": [{"channel": chans}]}]
+    return {"info": info, "time_stamps": np.asarray(ts, float), "time_series": data}
+
+
+T0 = 1000.0
+
+
+@pytest.fixture
+def eeg_stream():
+    """Two-channel 500 Hz EEG stream lasting 10 s."""
+    ts = T0 + np.arange(0, 10, 1 / 500)
+    data = np.random.default_rng(0).standard_normal((len(ts), 2))
+    return _stream("eeg", "EEG", ts, data, 500, ["Cz", "Pz"], ["uV", "uV"], "eeg")
+
+
+def test_build_raw_multichannel_markers(eeg_stream):
+    """Each marker sample yields one annotation, channels joined by '/'."""
+    mk = _stream("mk", "Markers", [T0 + 1, T0 + 5], [["a", "x"], ["b", "y"]], 0)
+    raw, _, _, _ = XDFLoader()._build_raw([eeg_stream, mk])
+    assert list(raw.annotations.description) == ["a/x", "b/y"]
+    np.testing.assert_allclose(raw.annotations.onset, [1, 5])
+
+
+def test_build_raw_drops_markers_outside_recording(eeg_stream, caplog):
+    """Markers before the first EEG sample are not added with negative onsets."""
+    mk = _stream("mk", "Markers", [T0 - 2, T0 + 3], [["early"], ["ok"]], 0)
+    with caplog.at_level(logging.WARNING):
+        raw, _, _, _ = XDFLoader()._build_raw([eeg_stream, mk])
+    assert list(raw.annotations.description) == ["ok"]
+    assert "outside the recorded EEG range" in caplog.text
+
+
+def test_build_raw_irregular_special_stream_goes_to_events(eeg_stream):
+    """An irregular special stream ends up in events under its label."""
+    fix = _stream("fixations", "Fixations", [T0 + 3, T0 + 4], [["f1"], ["f2"]], 0)
+    loader = XDFLoader(special_streams={"fix": {"name": "fixations"}})
+    _, _, events, _ = loader._build_raw([eeg_stream, fix])
+    assert list(events) == ["fix"]
+    descriptions, ts = events["fix"]
+    assert descriptions == ["f1", "f2"]
+    np.testing.assert_allclose(ts, [3, 4])
+
+
+def test_build_raw_millivolt_units():
+    """EEG in millivolts is scaled to volts."""
+    ts = T0 + np.arange(0, 2, 1 / 100)
+    eeg = _stream("eeg", "EEG", ts, np.ones((len(ts), 1)), 100, ["Cz"], ["mV"], "eeg")
+    raw, _, _, _ = XDFLoader()._build_raw([eeg])
+    np.testing.assert_allclose(raw.get_data()[0], 1e-3)
+
+
+def test_build_raw_crop_aligns_to_eeg_samples(eeg_stream):
+    """In crop mode t=0 is the first kept EEG sample and aux data match it."""
+    ts = T0 + 2.0013 + np.arange(0, 6, 1 / 120)  # not on the EEG sample grid
+    gaze = _stream("gaze", "Gaze", ts, np.c_[ts - T0, ts - T0], 120, ["gx", "gy"])
+    mk = _stream("mk", "Markers", [T0 + 4.0], [["m"]], 0)
+    loader = XDFLoader(special_streams={"gaze": {"name": "gaze"}}, on_mismatch="crop")
+    raw, _, _, session_t0 = loader._build_raw([eeg_stream, gaze, mk])
+
+    eeg_ts = eeg_stream["time_stamps"]
+    kept = eeg_ts[(eeg_ts >= ts[0]) & (eeg_ts <= ts[-1])]
+    assert session_t0 == pytest.approx(kept[0])
+    # gaze channel holds its own LSL time, so it must equal the EEG sample time
+    np.testing.assert_allclose(raw.get_data(picks="gx")[0], kept - T0, atol=1e-9)
+    np.testing.assert_allclose(raw.annotations.onset, [T0 + 4.0 - session_t0])
+
+
+def test_build_raw_missing_annotation_covers_last_sample(eeg_stream):
+    """A gap annotation that reaches the end covers the final sample too."""
+    ts = T0 + np.arange(0, 8, 1 / 100)  # ends 2 s before the EEG
+    gaze = _stream("gaze", "Gaze", ts, np.c_[np.sin(ts)], 100, ["gx"])
+    loader = XDFLoader(special_streams={"gaze": {"name": "gaze"}}, on_mismatch="pad")
+    raw, _, _, _ = loader._build_raw([eeg_stream, gaze])
+    (onset,), (duration,) = raw.annotations.onset, raw.annotations.duration
+    assert onset + duration == pytest.approx(raw.times[-1] + 1 / 500)

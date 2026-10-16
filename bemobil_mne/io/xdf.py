@@ -32,6 +32,8 @@ from bemobil_mne.io.alignment import (
 logger = logging.getLogger(__name__)
 
 _MICROVOLT_UNITS = frozenset(("microvolt", "microvolts", "µv", "μv", "uv"))
+_MILLIVOLT_UNITS = frozenset(("millivolt", "millivolts", "mv"))
+_NANOVOLT_UNITS = frozenset(("nanovolt", "nanovolts", "nv"))
 _VOLT_UNITS = frozenset(("v", "volt", "volts"))
 
 # %% Data container
@@ -81,6 +83,10 @@ def _unit_scale(unit: str, ch_name: str = "") -> float:
     normed = unit.strip().lower()
     if normed in _MICROVOLT_UNITS:
         return 1e-6
+    if normed in _MILLIVOLT_UNITS:
+        return 1e-3
+    if normed in _NANOVOLT_UNITS:
+        return 1e-9
     if normed not in _VOLT_UNITS and normed not in ("na", ""):
         logger.warning(
             "Unrecognised unit '%s' for channel '%s' -- assuming volts "
@@ -248,6 +254,20 @@ def _shorten_fif_ch_names(
         out.append(short)
         seen.add(short)
 
+    return out
+
+
+def _marker_descriptions(time_series) -> list[str]:
+    """Return one description per marker sample.
+
+    Multi-channel marker streams carry several values per sample (e.g.
+    ``["trialStart", "cond:A"]``); these are joined with ``"/"`` so that
+    every sample yields exactly one description.
+    """
+    out = []
+    for sample in time_series:
+        values = np.atleast_1d(sample)
+        out.append("/".join(str(v) for v in values if str(v) != ""))
     return out
 
 
@@ -475,6 +495,7 @@ class XDFLoader:
 
         # -- Locate Tier-1 auxiliary streams -----------------------------
         special_stream_objs: dict[str, dict] = {}
+        irregular_special: dict[str, dict] = {}
         for label, spec in self.special_streams.items():
             s = _match_stream(
                 streams, name=spec.get("name"), stream_type=spec.get("type")
@@ -488,6 +509,7 @@ class XDFLoader:
                     "routed to events, not merged into Raw.",
                     label,
                 )
+                irregular_special[label] = s
                 continue
             if len(s["time_stamps"]) < 2:
                 logger.warning(
@@ -507,19 +529,26 @@ class XDFLoader:
             start_time = eeg_t_start
             end_time = eeg_t_end
 
-        session_t0 = start_time
-
         # -- Build EEG RawArray -------------------------------------------
-        eeg_data, _ = _crop_stream(eeg_stream, start_time, end_time)
+        eeg_data, eeg_ts = _crop_stream(eeg_stream, start_time, end_time)
+        if len(eeg_ts) == 0:
+            raise RuntimeError(
+                "No EEG samples left after cropping to the common time range "
+                f"of all Tier-1 streams ({start_time:.3f}-{end_time:.3f} s). "
+                "Use on_mismatch='pad' to keep the full EEG range."
+            )
+        # t = 0 in the Raw object is the first EEG sample that was kept.
+        session_t0 = float(eeg_ts[0])
         info = mne.create_info(ch_names=labels, sfreq=eeg_native_sfreq, ch_types=types)
         raw = mne.io.RawArray((eeg_data * scale).T, info, verbose=False)
 
         # -- Align and append Tier-1 auxiliary streams --------------------
-        # Target timestamps span the EEG window at native EEG rate.
-        # If target_sfreq is set, MNE's resample runs after _build_raw and
-        # resamples all channels (EEG + aux) together with its own AA filter.
-        n_eeg_samples = eeg_data.shape[0]
-        tgt_ts = np.linspace(start_time, end_time, n_eeg_samples)
+        # Auxiliary streams are evaluated at the actual timestamps of the
+        # EEG samples, so sample i of every channel refers to the same
+        # instant. If target_sfreq is set, MNE's resample runs after
+        # _build_raw and resamples all channels together with its own AA
+        # filter.
+        tgt_ts = eeg_ts
 
         for label, s in special_stream_objs.items():
             src_data = np.array(s["time_series"], dtype=float)
@@ -567,6 +596,7 @@ class XDFLoader:
 
         # -- Collect Tier-2 streams (native rate, timestamps relative to t0) -
         tier2: dict[str, tuple[np.ndarray, np.ndarray]] = {}
+        tier2_objs: list[dict] = []
         for label, spec in self.tier2_streams.items():
             s = _match_stream(
                 streams, name=spec.get("name"), stream_type=spec.get("type")
@@ -577,6 +607,7 @@ class XDFLoader:
             t2_data = np.array(s["time_series"], dtype=float)
             t2_ts = np.array(s["time_stamps"]) - session_t0
             tier2[label] = (t2_data, t2_ts)
+            tier2_objs.append(s)
             logger.info(
                 "Stored Tier-2 stream '%s' at native rate (~%.1f Hz, %d samples)",
                 label,
@@ -587,40 +618,54 @@ class XDFLoader:
         # -- Marker streams -> MNE annotations ---------------------------
         events: dict[str, tuple[list[str], np.ndarray]] = {}
 
+        marker_types = {t.lower() for t in self.marker_stream_types}
+        raw_duration = raw.times[-1]
         for stream_type in self.marker_stream_types:
             matched = _match_stream(
                 streams, stream_type=stream_type, allow_multiple=True
             )
             for s in matched:
                 onsets = np.array(s["time_stamps"]) - session_t0
-                descriptions = [item for sub in s["time_series"] for item in sub]
-                raw.annotations.append(onsets, [0.0] * len(onsets), descriptions)
+                descriptions = np.array(_marker_descriptions(s["time_series"]))
+                inside = (onsets >= 0) & (onsets <= raw_duration)
+                if not inside.all():
+                    logger.warning(
+                        "Stream '%s': %d marker(s) outside the recorded EEG "
+                        "range were not added as annotations.",
+                        s["info"].get("name", ["?"])[0],
+                        int((~inside).sum()),
+                    )
+                raw.annotations.append(
+                    onsets[inside], [0.0] * int(inside.sum()), descriptions[inside]
+                )
                 logger.info(
                     "Added %d markers from stream '%s'",
-                    len(descriptions),
+                    int(inside.sum()),
                     s["info"].get("name", ["?"])[0],
                 )
 
         # -- Remaining irregular streams -> events dict -------------------
-        handled_names = {eeg_stream["info"].get("name", [""])[0]}
-        for label in list(self.special_streams) + list(self.tier2_streams):
-            spec = (
-                self.special_streams.get(label) or self.tier2_streams.get(label)
-            ) or {}
-            if spec.get("name"):
-                handled_names.add(spec["name"])
+        # Streams already used as EEG, Tier-1 or Tier-2 are skipped; irregular
+        # special_streams are kept here under their user-given label.
+        used = [eeg_stream, *special_stream_objs.values(), *tier2_objs]
+        labels_for = {id(s): label for label, s in irregular_special.items()}
 
         for s in streams:
+            if any(s is u for u in used):
+                continue
             stream_name = s["info"].get("name", [""])[0]
             stream_type_val = s["info"].get("type", [""])[0]
-            if stream_name in handled_names:
-                continue
-            if stream_type_val in self.marker_stream_types:
+            if stream_type_val.lower() in marker_types:
                 continue
             if _is_irregular(s) and len(s["time_stamps"]) > 0:
                 ts_rel = np.array(s["time_stamps"]) - session_t0
-                descriptions = [item for sub in s["time_series"] for item in sub]
-                ev_label = stream_name or stream_type_val or f"irregular_{len(events)}"
+                descriptions = _marker_descriptions(s["time_series"])
+                ev_label = (
+                    labels_for.get(id(s))
+                    or stream_name
+                    or stream_type_val
+                    or f"irregular_{len(events)}"
+                )
                 events[ev_label] = (descriptions, ts_rel)
                 logger.info(
                     "Stored irregular event stream '%s' (%d events)",
@@ -643,9 +688,13 @@ class XDFLoader:
         diff = np.diff(padded.astype(int))
         starts = np.where(diff == 1)[0]
         ends = np.where(diff == -1)[0]
+        dt = float(np.median(np.diff(tgt_ts))) if len(tgt_ts) > 1 else 0.0
         for s_idx, e_idx in zip(starts, ends):
             onset = tgt_ts[s_idx] - session_t0
-            duration = tgt_ts[min(e_idx, len(tgt_ts) - 1)] - tgt_ts[s_idx]
+            # e_idx is exclusive; a run reaching the last sample spans one
+            # more sample interval.
+            t_end = tgt_ts[e_idx] if e_idx < len(tgt_ts) else tgt_ts[-1] + dt
+            duration = t_end - tgt_ts[s_idx]
             raw.annotations.append(onset, duration, f"BAD_{label}_missing")
 
     def _set_montage(self, raw: mne.io.BaseRaw) -> None:
