@@ -74,7 +74,6 @@ in isolation.
    compute_ica
    detect_bad_by_line_noise
    compute_mi_reduction
-   get_raw_subset
 
 ----
 

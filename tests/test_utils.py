@@ -20,7 +20,6 @@ from bemobil_mne.preproc.utils import (
     detect_bad_by_line_noise,
     format_duration,
     get_descriptor,
-    get_raw_subset,
     init_descriptor,
     set_descriptor,
     sig_params,
@@ -183,31 +182,6 @@ def test_sig_params_passes_all_when_var_kwargs():
 
     result = sig_params(fn, x=1, y=2)
     assert result == {"x": 1, "y": 2}
-
-
-# %% get_raw_subset
-
-
-def test_get_raw_subset_returns_requested(tiny_raw):
-    """Return Raw with exactly the requested channels."""
-    present = tiny_raw.ch_names[:3]
-    sub = get_raw_subset(tiny_raw, subset_chs=present)
-    assert sub is not None
-    assert sub.ch_names == present
-
-
-def test_get_raw_subset_skips_missing(tiny_raw):
-    """Silently drop channel names not in Raw."""
-    chs = [tiny_raw.ch_names[0], "NONEXISTENT_CH"]
-    sub = get_raw_subset(tiny_raw, subset_chs=chs)
-    assert sub is not None
-    assert "NONEXISTENT_CH" not in sub.ch_names
-
-
-def test_get_raw_subset_returns_none_when_none_present(tiny_raw):
-    """Return None when no requested channels exist."""
-    sub = get_raw_subset(tiny_raw, subset_chs=["GHOST1", "GHOST2"])
-    assert sub is None
 
 
 # %% remove_line

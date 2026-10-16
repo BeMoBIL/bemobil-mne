@@ -52,8 +52,8 @@ seed = 869330571  # good practice: pick a random seed via secrets.randbits(31)
 #
 # `run_raw` returns a 3-tuple: (raw_clean, report, metadata).
 # `report` is an `mne.Report` (populated when make_report=True, else None).
-# `metadata` is a dict with keys: raw_minimal, raw_pre_ica, raw_subset, ica,
-# ic_labels, dipoles, residuals, trans, bad_ch_dict.
+# `metadata` is a dict with keys: raw_minimal, raw_pre_ica, ica, ic_labels,
+# dipoles, residuals, trans, bad_ch_dict.
 #
 # Set fit_dipoles=True to also get dipole fits and trans.
 # line_noise_freq accepts "europe" (50 Hz) or "usa" (60 Hz) as shortcuts,
@@ -78,7 +78,6 @@ raw_clean, report, metadata = preprocessor.run_raw(
 )
 raw_minimal = metadata["raw_minimal"]
 raw_pre_ica = metadata["raw_pre_ica"]
-raw_subset = metadata["raw_subset"]
 ica = metadata["ica"]
 ic_labels = metadata["ic_labels"]
 dipoles = metadata["dipoles"]
@@ -119,7 +118,6 @@ if do_dipoles:
     ).run_raw(raw, fname_out=fname_out, overwrite=True)
     raw_minimal = metadata["raw_minimal"]
     raw_pre_ica = metadata["raw_pre_ica"]
-    raw_subset = metadata["raw_subset"]
     ica = metadata["ica"]
     ic_labels = metadata["ic_labels"]
     dipoles = metadata["dipoles"]
@@ -144,7 +142,6 @@ raw_clean, report, metadata = EEGPreprocessor(
 ).run_raw(raw, fname_out=None)
 raw_minimal = metadata["raw_minimal"]
 raw_pre_ica = metadata["raw_pre_ica"]
-raw_subset = metadata["raw_subset"]
 ica = metadata["ica"]
 ic_labels = metadata["ic_labels"]
 dipoles = metadata["dipoles"]

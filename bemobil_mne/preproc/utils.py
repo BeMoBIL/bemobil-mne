@@ -25,20 +25,6 @@ from mne_icalabel.iclabel import iclabel_label_components
 
 LOGGER = logging.getLogger(__name__)
 
-# %% Settings & Constants
-
-# Subset of channels to return when calling get_raw_subset() without a specific list
-SUBSET_CHANNELS = [
-    "Cz",
-    "C1",
-    "C2",
-    "F1",
-    "F2",
-    "F3",
-    "F4",
-    "Fz",
-]
-
 # %% Functions
 
 
@@ -400,48 +386,6 @@ def build_sys_info(source_data=None):
             sections.append("conda export\n" + "-" * 12 + "\n" + conda_result.stdout)
 
     return "\n\n".join(sections)
-
-
-# %% Channel subset helper
-
-
-def get_raw_subset(raw, subset_chs=None):
-    """Return a copy of *raw* containing only the requested subset of channels.
-
-    Parameters
-    ----------
-    raw : mne.io.BaseRaw
-        Source recording.
-    subset_chs : list of str | None
-        Channel names to keep.  Defaults to :data:`SUBSET_CHANNELS`
-        (frontal channels of the equidistant cap).
-
-    Returns
-    -------
-    mne.io.Raw | None
-        Copy of *raw* with only the available subset channels, or ``None``
-        if none of the requested channels are present.
-    """
-    if subset_chs is None:
-        subset_chs = SUBSET_CHANNELS
-
-    subset_chs = list(subset_chs)
-    present = [ch for ch in subset_chs if ch in raw.ch_names]
-    missing = [ch for ch in subset_chs if ch not in raw.ch_names]
-
-    if not present:
-        LOGGER.warning("No requested subset channels available in raw. Returning None.")
-        return None
-
-    if missing:
-        LOGGER.warning(
-            f"Requested subset channels not in raw: {missing}. "
-            f"Using available subset: {present}"
-        )
-
-    raw_subset = raw.copy().pick(present)
-    LOGGER.info(f"Created subset raw with channels: {raw_subset.ch_names}")
-    return raw_subset
 
 
 # %% Coregistration / transform helpers
