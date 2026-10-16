@@ -26,7 +26,8 @@ from bemobil_mne.preproc.utils import get_descriptor
 sample_paths = eegbci.load_data([1], [6], update_path=True)
 raw = mne.io.read_raw(sample_paths[0], verbose=False, preload=True)
 eegbci.standardize(raw)
-raw.set_montage(mne.channels.make_standard_montage("standard_1005"))
+# "colin27_1005" was called "standard_1005" before MNE 1.13
+raw.set_montage(mne.channels.make_standard_montage("colin27_1005"))
 
 # Crop to the first 60 s: the full recording is ~125 s, but 60 s already contains
 # all event types and exercises every code path below, while keeping ICA and TFR

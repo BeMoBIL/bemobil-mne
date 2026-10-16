@@ -46,7 +46,7 @@ Quick start
 
    # 1. Load a multimodal XDF recording
    loader = XDFLoader(
-       montage="standard_1020",
+       montage="easycap-M1",
        target_sfreq=250.0,
    )
    recording = loader.load("sub-01_task-walk_run-01.xdf")

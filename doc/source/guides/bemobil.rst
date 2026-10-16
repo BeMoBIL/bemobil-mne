@@ -154,7 +154,7 @@ The following script replicates the core BeMoBIL EEG preprocessing steps using B
    # --- Equivalent to bemobil_process_all_EEG_preprocessing ---
 
    loader = XDFLoader(
-       montage="standard_1020",       # channel_locations_filename
+       montage="easycap-M1",          # channel_locations_filename
        target_sfreq=250.0,            # resample_freq = 250
        old_reference="FCz",           # ref_channel = 'FCz'
    )
