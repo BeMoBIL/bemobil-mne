@@ -320,6 +320,20 @@ def get_bad_chs(
 # %% Classes
 
 
+def _try_report(make_report_func, **kwargs):
+    """Build the report; turn a failure into a warning and return ``None``."""
+    try:
+        return make_report_func(**kwargs)
+    except Exception as exc:
+        warnings.warn(
+            f"Report generation failed ({type(exc).__name__}: {exc}); the "
+            "other outputs are unaffected.",
+            RuntimeWarning,
+            stacklevel=3,
+        )
+        return None
+
+
 def _expand_line_noise_freq(line_noise_freq, sfreq):
     """Return harmonics of *line_noise_freq* up to (but not exceeding) Nyquist.
 
@@ -699,6 +713,10 @@ class EEGPreprocessor:
         :meth:`run_raw` for the report's drop-out plots, and ``events`` is
         discarded (call :meth:`run_raw` directly if you need it).
 
+        The montage set by the loader is kept. Only when the loaded data
+        has no montage is the ``standard_1005`` template applied (channels
+        not in the template get a warning).
+
         Parameters
         ----------
         fname_in : str | Path
@@ -721,7 +739,13 @@ class EEGPreprocessor:
         raw = rec.raw
         if self.channel_types:
             raw.set_channel_types(self.channel_types)
-        raw.set_montage(mne.channels.make_standard_montage("standard_1005"))
+        if raw.get_montage() is None:
+            # Fall back to standard 10-05 positions only when the loader did
+            # not set a montage (e.g. XDFLoader(montage=...)).
+            raw.set_montage(
+                mne.channels.make_standard_montage("standard_1005"),
+                on_missing="warn",
+            )
         return self.run_raw(
             raw, fname_out=fname_out, overwrite=overwrite, tier2=rec.tier2
         )
@@ -737,6 +761,7 @@ class EEGPreprocessor:
         """Run the preprocessing pipeline on an already-loaded *raw* object.
 
         Channel types and montage must already be set by the caller.
+        *raw* itself is not modified; the pipeline works on a copy.
 
         Parameters
         ----------
@@ -769,9 +794,10 @@ class EEGPreprocessor:
             All other pipeline outputs, keyed by name:
 
             - ``raw_source`` (:class:`mne.io.Raw`): the input exactly as
-              passed to :meth:`run_raw`, nothing done. Written to the BIDS
-              raw folder when ``save_bids_raw=True``; when loaded from cache,
-              read back from there (``None`` if not found).
+              passed to :meth:`run_raw` (the same object), nothing done.
+              Written to the BIDS raw folder when ``save_bids_raw=True``;
+              when loaded from cache, read back from there (``None`` if
+              not found).
             - ``raw_pre_ica`` (:class:`mne.io.Raw`): every step except ICA
               (line-noise removal, bandpass, ASR if enabled). The data ICA
               is fitted on. Bad channels are marked but not interpolated and
@@ -798,6 +824,15 @@ class EEGPreprocessor:
               hold the per-method results.
         """
         old_verbose = mne.set_log_level(verbose=self.verbose, return_old_level=True)
+        try:
+            return self._run_raw(
+                raw, fname_out=fname_out, overwrite=overwrite, tier2=tier2
+            )
+        finally:
+            mne.set_log_level(verbose=old_verbose)
+
+    def _run_raw(self, raw, fname_out, *, overwrite, tier2):
+        """Run the pipeline body; see :meth:`run_raw`."""
         timer = StepTimer()
 
         # --- Skip-if-exists caching ---
@@ -814,8 +849,11 @@ class EEGPreprocessor:
             )
             return self._load_cached_outputs(fname_out)
 
-        # --- Source copy (nothing done) ---
-        raw_source = raw.copy()
+        # --- Source (nothing done) ---
+        # The caller's object is never modified: keep it as raw_source and
+        # run every step on a preloaded copy.
+        raw_source = raw
+        raw = raw.copy().load_data()
 
         # --- Provenance ---
         filenames = [str(p) for p in getattr(raw, "filenames", []) if p]
@@ -893,6 +931,15 @@ class EEGPreprocessor:
             notch_lines=_notch_lines,
             **_bad_ch_kw,
         )
+        eeg_chs = [raw.ch_names[i] for i in mne.pick_types(raw.info, eeg=True)]
+        if not set(eeg_chs) - set(bad_ch_dict["all_bads"]):
+            raise RuntimeError(
+                f"All {len(eeg_chs)} EEG channels were flagged as bad "
+                f"(see bad_ch_dict: pyprep={bad_ch_dict['pyprep'].get('bad_all')}, "
+                f"faster={bad_ch_dict['faster'].get('bad_all')}). Check the "
+                "recording, or relax the criteria via get_bad_chs_kwargs "
+                "(e.g. deviation_threshold, ransac=False)."
+            )
         raw.info["bads"] = bad_ch_dict["all_bads"]
         append_desc(
             raw,
@@ -1058,12 +1105,39 @@ class EEGPreprocessor:
 
         timer.log_step("rereference_interpolate", time.perf_counter() - t0)
 
+        # --- Save (optional) ---
+        if fname_out is not None:
+            t0 = time.perf_counter()
+            self._save_outputs(
+                fname_out,
+                raw_clean=raw_clean,
+                raw_pre_ica=raw_pre_ica,
+                ica=ica,
+                ic_labels=ic_labels,
+                dipoles=dipoles,
+                residuals=residuals,
+                trans=trans_out,
+                bad_ch_dict=bad_ch_dict,
+                overwrite=overwrite,
+            )
+            timer.log_step("save", time.perf_counter() - t0)
+
+            # --- Untouched input -> raw BIDS folder (optional) ---
+            if self.save_bids_raw:
+                t0 = time.perf_counter()
+                # Uses self.overwrite_bids_raw, NOT `overwrite`: rerunning
+                # the derivatives must not rewrite the BIDS raw.
+                self._save_bids_raw(raw_source, fname_out)
+                timer.log_step("save_bids_raw", time.perf_counter() - t0)
+
         # --- Report (optional) ---
+        # Built after saving so a failing report never costs the derivatives.
         report = None
         if self.make_report:
             from bemobil_mne.preproc.make_report import make_report as _make_report
 
-            report = _make_report(
+            report = _try_report(
+                _make_report,
                 raw_pre_ica=raw_pre_ica,
                 raw_clean=raw_clean,
                 ica=ica,
@@ -1082,38 +1156,12 @@ class EEGPreprocessor:
                 ica_annots=ica_annots,
                 raw_source=raw_source,
             )
-
-        # --- Save (optional) ---
-        if fname_out is not None:
-            t0 = time.perf_counter()
-            self._save_outputs(
-                fname_out,
-                raw_clean=raw_clean,
-                raw_pre_ica=raw_pre_ica,
-                ica=ica,
-                ic_labels=ic_labels,
-                dipoles=dipoles,
-                residuals=residuals,
-                trans=trans_out,
-                bad_ch_dict=bad_ch_dict,
-                report=report,
-                overwrite=overwrite,
-            )
-            timer.log_step("save", time.perf_counter() - t0)
-
-            # --- Untouched input -> raw BIDS folder (optional) ---
-            if self.save_bids_raw:
-                t0 = time.perf_counter()
-                # Uses self.overwrite_bids_raw, NOT `overwrite`: rerunning
-                # the derivatives must not rewrite the BIDS raw.
-                self._save_bids_raw(raw_source, fname_out)
-                timer.log_step("save_bids_raw", time.perf_counter() - t0)
+            if report is not None and fname_out is not None:
+                self._save_report(report, fname_out, overwrite=overwrite)
 
         import logging as _logging
 
         _logging.getLogger(__name__).info(timer.format_summary())
-
-        mne.set_log_level(verbose=old_verbose)
 
         metadata = {
             "raw_source": raw_source,
@@ -1142,7 +1190,6 @@ class EEGPreprocessor:
         residuals,
         trans,
         bad_ch_dict,
-        report,
         overwrite,
     ):
         """Save all pipeline derivatives to disk (see get_derivative_paths)."""
@@ -1182,8 +1229,12 @@ class EEGPreprocessor:
         if dipoles and trans is not None:
             trans.save(paths["trans"], overwrite=overwrite, verbose="error")
 
-        if report is not None:
-            report.save(str(paths["report"]), overwrite=overwrite, open_browser=False)
+    @staticmethod
+    def _save_report(report, fname_out, *, overwrite):
+        """Save *report* next to the derivatives of *fname_out*."""
+        path = get_derivative_paths(fname_out)["report"]
+        path.parent.mkdir(parents=True, exist_ok=True)
+        report.save(str(path), overwrite=overwrite, open_browser=False)
 
     def _save_bids_raw(self, raw_source, fname_out):
         """Write the untouched input to the raw part of the BIDS dataset.
@@ -1445,12 +1496,17 @@ class EEGPreprocessor:
             excluded=ica.exclude,
         )
 
+        if save:
+            raw_clean.save(paths["clean"], overwrite=True, verbose="error")
+            ica.save(paths["ica"], overwrite=True, verbose="error")
+
         report = None
         if self.make_report if make_report is None else make_report:
             from bemobil_mne.preproc.make_report import make_report as _make_report
 
             raw_source = metadata["raw_source"]
-            report = _make_report(
+            report = _try_report(
+                _make_report,
                 raw_pre_ica=raw_pre_ica,
                 raw_clean=raw_clean,
                 ica=ica,
@@ -1465,11 +1521,7 @@ class EEGPreprocessor:
                 ica_annots=raw_pre_ica.annotations,
                 raw_source=(raw_source.load_data() if raw_source is not None else None),
             )
-
-        if save:
-            raw_clean.save(paths["clean"], overwrite=True, verbose="error")
-            ica.save(paths["ica"], overwrite=True, verbose="error")
-            if report is not None:
-                report.save(str(paths["report"]), overwrite=True, open_browser=False)
+            if save and report is not None:
+                self._save_report(report, fname_out, overwrite=True)
 
         return (raw_clean, report, metadata)

@@ -498,3 +498,148 @@ def test_eegpreprocessor_label_defaults():
         EEGPreprocessor(
             loader=None, exclude_labels=["eye blink"], include_labels={"brain"}
         )
+
+
+# %% run / run_raw behaviour
+
+
+def _correlated_raw(n_ch=16, sfreq=250.0, duration=30.0, seed=0):
+    """EEG with a shared smooth source so PyPREP does not reject everything."""
+    rng = np.random.default_rng(seed)
+    montage = mne.channels.make_standard_montage("easycap-M1")
+    ch_names = montage.ch_names[:n_ch]
+    n_times = int(sfreq * duration)
+    common = np.convolve(rng.standard_normal(n_times), np.ones(25) / 5, "same")
+    mixing = rng.uniform(0.5, 1.5, n_ch)[:, None]
+    data = (mixing * common + 0.1 * rng.standard_normal((n_ch, n_times))) * 1e-5
+    raw = mne.io.RawArray(data, mne.create_info(ch_names, sfreq, "eeg"), verbose=False)
+    raw.set_montage(montage, on_missing="ignore")
+    return raw
+
+
+def _fast_proc(**kwargs):
+    defaults = dict(
+        line_noise_method=None,
+        fit_ica=False,
+        make_report=False,
+        save_bids_raw=False,
+        verbose="error",
+    )
+    return EEGPreprocessor(loader=None, **{**defaults, **kwargs})
+
+
+def test_run_raw_does_not_modify_input():
+    """The caller's raw keeps its data, bads, projections and description."""
+    raw = _correlated_raw()
+    data = raw.get_data().copy()
+    with pytest.warns(RuntimeWarning, match="fit_ica=False"):
+        raw_clean, _, metadata = _fast_proc().run_raw(raw)
+    np.testing.assert_array_equal(raw.get_data(), data)
+    assert raw.info["bads"] == []
+    assert raw.info["projs"] == []
+    assert raw.info["description"] is None
+    assert metadata["raw_source"] is raw
+    assert raw_clean is not raw
+
+
+def test_run_raw_restores_log_level_on_error():
+    """MNE's log level is restored even when the pipeline raises."""
+    from unittest.mock import patch
+
+    from bemobil_mne.preproc import preprocessing as pp
+
+    mne.set_log_level("INFO")
+    with patch.object(pp, "get_bad_chs", side_effect=RuntimeError("boom")):
+        with pytest.raises(RuntimeError, match="boom"):
+            _fast_proc(verbose="error").run_raw(_correlated_raw())
+    assert mne.utils.logger.level == 20  # INFO
+
+
+def test_run_raw_restores_log_level_on_cache_hit(tmp_path):
+    """The skip_if_exists early return restores the log level too."""
+    from unittest.mock import patch
+
+    fname_out = tmp_path / "sub-01_task-rest_eeg.fif"
+    get_derivative_paths(fname_out)["clean"].touch()
+    proc = _fast_proc(skip_if_exists=True, verbose="error")
+    mne.set_log_level("INFO")
+    with patch.object(EEGPreprocessor, "_load_cached_outputs", return_value=(1, 2, 3)):
+        assert proc.run_raw(_correlated_raw(), fname_out=fname_out) == (1, 2, 3)
+    assert mne.utils.logger.level == 20  # INFO
+
+
+def test_run_raw_all_channels_bad_raises():
+    """A clear error is raised when every EEG channel is flagged bad."""
+    from unittest.mock import patch
+
+    from bemobil_mne.preproc import preprocessing as pp
+
+    raw = _correlated_raw()
+    fake = {
+        "all_bads": list(raw.ch_names),
+        "pyprep": {"bad_all": list(raw.ch_names)},
+        "faster": {"bad_all": []},
+        "bad_by_line_noise": [],
+        "bad_by_manual": [],
+    }
+    with patch.object(pp, "get_bad_chs", return_value=fake):
+        with pytest.raises(RuntimeError, match="All 16 EEG channels"):
+            _fast_proc().run_raw(raw)
+
+
+def test_run_raw_saves_outputs_when_report_fails(tmp_path):
+    """A failing report is a warning; the derivatives are still written."""
+    from unittest.mock import patch
+
+    fname_out = tmp_path / "sub-01_task-rest_eeg.fif"
+    proc = _fast_proc(make_report=True)
+    with patch(
+        "bemobil_mne.preproc.make_report.make_report",
+        side_effect=ValueError("bad event_id"),
+    ):
+        with pytest.warns(RuntimeWarning, match="Report generation failed"):
+            _, report, _ = proc.run_raw(_correlated_raw(), fname_out=fname_out)
+    assert report is None
+    assert get_derivative_paths(fname_out)["clean"].exists()
+    assert get_derivative_paths(fname_out)["pre_ica"].exists()
+
+
+class _FakeLoader:
+    """Loader stub returning a fixed MultimodalRecording."""
+
+    def __init__(self, raw):
+        self.raw = raw
+
+    def load(self, fname):
+        from bemobil_mne.io import MultimodalRecording
+
+        return MultimodalRecording(raw=self.raw)
+
+
+def test_run_keeps_loader_montage():
+    """run() does not replace a montage set by the loader."""
+    from unittest.mock import patch
+
+    raw = _correlated_raw(n_ch=4)
+    raw.rename_channels({ch: f"g{i + 1}" for i, ch in enumerate(raw.ch_names)})
+    pos = {f"g{i + 1}": np.array([0.05 * i, 0.02, 0.07]) for i in range(4)}
+    custom = mne.channels.make_dig_montage(pos, coord_frame="head")
+    raw.set_montage(custom)
+
+    proc = EEGPreprocessor(loader=_FakeLoader(raw))
+    with patch.object(EEGPreprocessor, "run_raw", return_value="ok") as run_raw:
+        assert proc.run("in.xdf") == "ok"
+    got = run_raw.call_args.args[0].get_montage().get_positions()["ch_pos"]
+    np.testing.assert_allclose(got["g2"], pos["g2"])
+
+
+def test_run_sets_standard_montage_when_missing():
+    """run() falls back to standard_1005 when the loader set no montage."""
+    from unittest.mock import patch
+
+    raw = _correlated_raw(n_ch=4)
+    raw.set_montage(None)
+    proc = EEGPreprocessor(loader=_FakeLoader(raw))
+    with patch.object(EEGPreprocessor, "run_raw", return_value="ok") as run_raw:
+        proc.run("in.xdf")
+    assert run_raw.call_args.args[0].get_montage() is not None
