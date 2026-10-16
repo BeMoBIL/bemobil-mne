@@ -442,3 +442,53 @@ def test_build_sys_info_includes_source_data(tmp_path):
     f.touch()
     info_str = build_sys_info(source_data=[f])
     assert str(f) in info_str
+
+
+# %% compute_ica label selection
+
+
+def _fake_iclabel(labels):
+    """Return a stand-in for iclabel_label_components with fixed winners."""
+    from mne_icalabel.config import ICALABEL_METHODS_NUMERICAL_TO_STRING
+
+    to_idx = {v: k for k, v in ICALABEL_METHODS_NUMERICAL_TO_STRING["iclabel"].items()}
+
+    def _label(inst, ica, backend=None):
+        proba = np.full((ica.n_components_, 7), 0.01)
+        for i in range(ica.n_components_):
+            proba[i, to_idx[labels[i % len(labels)]]] = 0.9
+        return proba
+
+    return _label
+
+
+@pytest.mark.parametrize(
+    "kwargs, expected",
+    [
+        ({"exclude_labels": ["eye blink"]}, {"eye blink"}),
+        ({"include_labels": ["brain"]}, {"eye blink", "muscle artifact", "other"}),
+        ({}, {"eye blink", "muscle artifact"}),  # default keep: brain + other
+    ],
+)
+def test_compute_ica_popularity_vote_labels(rng, kwargs, expected):
+    """Popularity vote honours exclude_labels and include_labels."""
+    from unittest.mock import patch
+
+    from bemobil_mne.preproc import utils
+
+    montage = mne.channels.make_standard_montage("easycap-M1")
+    info = mne.create_info(montage.ch_names[:8], 250.0, "eeg")
+    raw = mne.io.RawArray(rng.standard_normal((8, 250 * 20)) * 1e-5, info)
+    raw.set_montage(montage)
+    labels = ["brain", "eye blink", "muscle artifact", "other"]
+    with patch.object(utils, "iclabel_label_components", _fake_iclabel(labels)):
+        ica, _ = utils.compute_ica(
+            raw,
+            filter_bands_ica=(1.0, None),
+            thresh=-1,
+            ica_method="picard",
+            rng_seed=0,
+            **kwargs,
+        )
+    want = [i for i in range(ica.n_components_) if labels[i % 4] in expected]
+    assert ica.exclude == want

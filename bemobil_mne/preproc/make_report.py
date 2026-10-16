@@ -5,14 +5,16 @@
 from __future__ import annotations
 
 import datetime
+import gc
+import html as _html
 import json
 import logging
 import os
+import re
 import tempfile
 import warnings
 from pathlib import Path
 
-import matplotlib
 import matplotlib.pyplot as plt
 import mne
 import numpy as np
@@ -50,14 +52,6 @@ def _add_temp_image(report, fig, *, title, caption="", section=None):
             os.unlink(tmp_path)
         except OSError:
             pass
-
-
-def _clear_matplotlib_memory():
-    """Close all matplotlib figures and trigger garbage collection."""
-    import gc
-
-    plt.close("all")
-    gc.collect()
 
 
 def _gui_available() -> bool:
@@ -433,6 +427,22 @@ def _glue_imgs(paths: list, out_path: str | Path) -> bool:
     return True
 
 
+def _safe_label(label: str) -> str:
+    """Return *label* reduced to characters that are valid in file names.
+
+    Condition names such as ``"trialStart;condition:A"`` contain characters
+    (``:``, ``;``, ``/``) that are invalid on Windows or in BIDS labels.
+    """
+    return re.sub(r"[^A-Za-z0-9]+", "-", str(label)).strip("-") or "condition"
+
+
+def _derivative_base(fname_out: Path) -> str:
+    """Return the BIDS base name used for the other derivatives of a run."""
+    from bemobil_mne.preproc.preprocessing import get_derivative_paths
+
+    return get_derivative_paths(fname_out)["report"].name[: -len("_report.html")]
+
+
 def _add_joint_plot(report, evokeds_dict_ave: dict, fname_out: Path | None) -> None:
     """Save butterfly + GFP per condition as PNGs, combine, and add to *report*.
 
@@ -450,10 +460,10 @@ def _add_joint_plot(report, evokeds_dict_ave: dict, fname_out: Path | None) -> N
             except Exception as exc:
                 LOGGER.warning(f"Skipping joint plot for '{condition}': {exc}")
                 continue
-            safe_cond = condition.replace("/", "-")
+            safe_cond = _safe_label(condition)
             if fname_out is not None:
                 savepath = fname_out.with_name(
-                    f"{fname_out.stem}_joint-{safe_cond}.png"
+                    f"{_derivative_base(fname_out)}_joint-{safe_cond}.png"
                 )
             else:
                 savepath = Path(tmpdir) / f"joint-{safe_cond}.png"
@@ -469,7 +479,7 @@ def _add_joint_plot(report, evokeds_dict_ave: dict, fname_out: Path | None) -> N
         else:
             if fname_out is not None:
                 combined_path = fname_out.with_name(
-                    f"{fname_out.stem}_joint-COMBINED.png"
+                    f"{_derivative_base(fname_out)}_joint-COMBINED.png"
                 )
             else:
                 combined_path = Path(tmpdir) / "joint-COMBINED.png"
@@ -763,11 +773,61 @@ def make_report(
         rebuilding a report from cached outputs and the BIDS raw cannot be
         found), ``raw_pre_ica`` is shown instead.
     """
-    # Force headless Agg backend so report generation works without a display
-    matplotlib.use("Agg", force=True)
-
     old_log_level = mne.set_log_level("warning", return_old_level=True)
+    figs_before = set(plt.get_fignums())
+    try:
+        # Render without touching the user's matplotlib backend: no global
+        # backend switch, no figure windows (ioff), and the matplotlib
+        # browser for ICA source plots (the Qt browser cannot be captured).
+        with plt.ioff(), mne.viz.use_browser_backend("matplotlib"):
+            return _build_report(
+                raw_pre_ica=raw_pre_ica,
+                raw_clean=raw_clean,
+                ica=ica,
+                ic_labels=ic_labels,
+                dipoles=dipoles,
+                residuals=residuals,
+                trans=trans,
+                bad_ch_dict=bad_ch_dict,
+                fname_out=fname_out,
+                event_id=event_id,
+                thresh=thresh,
+                step_timings=step_timings,
+                tier2=tier2,
+                pre_hook_description=pre_hook_description,
+                pre_hook_source=pre_hook_source,
+                ica_annots=ica_annots,
+                raw_source=raw_source,
+            )
+    finally:
+        mne.set_log_level(old_log_level)
+        # Close only the figures created here, never the user's own.
+        for num in set(plt.get_fignums()) - figs_before:
+            plt.close(num)
+        gc.collect()
 
+
+def _build_report(
+    raw_pre_ica: mne.io.BaseRaw,
+    raw_clean: mne.io.BaseRaw,
+    ica: mne.preprocessing.ICA,
+    ic_labels: dict,
+    dipoles: list,
+    residuals: list,
+    trans,
+    bad_ch_dict: dict,
+    *,
+    fname_out: str | Path | None = None,
+    event_id: dict | None = None,
+    thresh: float = 0.7,
+    step_timings: list[dict] | None = None,
+    tier2: dict[str, tuple[np.ndarray, np.ndarray]] | None = None,
+    pre_hook_description: str | None = None,
+    pre_hook_source: str | None = None,
+    ica_annots: mne.Annotations | None = None,
+    raw_source: mne.io.BaseRaw | None = None,
+) -> mne.Report:
+    """Build the report; see :func:`make_report`."""
     title = (
         f"EEGPreprocessor report: {Path(fname_out).name}"
         if fname_out is not None
@@ -793,11 +853,12 @@ def make_report(
     if pre_hook_description is not None or pre_hook_source is not None:
         parts = []
         if pre_hook_description is not None:
-            parts.append(f"<pre>{pre_hook_description}</pre>")
+            parts.append(f"<pre>{_html.escape(pre_hook_description)}</pre>")
         if pre_hook_source is not None:
             parts.append(
                 "<details><summary>Source code</summary>"
-                f'<pre><code class="language-python">{pre_hook_source}</code></pre>'
+                '<pre><code class="language-python">'
+                f"{_html.escape(pre_hook_source)}</code></pre>"
                 "</details>"
             )
         report.add_html("\n".join(parts), title="Pre-hook")
@@ -890,11 +951,24 @@ def make_report(
     else:
         events = np.empty((0, 3), dtype=int)
 
+    # Only keep the conditions that actually occur in the data; mne.Epochs
+    # raises for event_id entries without events.
+    present_ids = set(events[:, 2].tolist())
+    missing_conds = sorted(
+        k for k, v in (event_id or {}).items() if v not in present_ids
+    )
+    event_id = {k: v for k, v in (event_id or {}).items() if v in present_ids}
+
     if len(events) > 0:
         event_id_html = (
             "<p>Event map supplied for epoch creation.</p>"
             f"<pre><code>{json.dumps(event_id, indent=4)}</code></pre>"
         )
+        if missing_conds:
+            event_id_html += (
+                "<p>Not found in the data (skipped): "
+                f"<code>{_html.escape(', '.join(missing_conds))}</code></p>"
+            )
         report.add_html(event_id_html, title="Event ID")
 
         report.add_events(
@@ -918,7 +992,11 @@ def make_report(
         del raw_clean_lp
         report.add_epochs(inst_clean, title="Epochs", psd=True)
 
-        evokeds_dict_ave = {cond: inst_clean[cond].average() for cond in event_id}
+        evokeds_dict_ave = {
+            cond: inst_clean[cond].average()
+            for cond in event_id
+            if len(inst_clean[cond]) > 0
+        }
         del inst_clean
 
         # Butterfly + GFP + topomaps
@@ -1070,8 +1148,5 @@ def make_report(
 
     # --- System info ---
     report.add_sys_info(title="System information")
-
-    mne.set_log_level(old_log_level, return_old_level=False)
-    _clear_matplotlib_memory()
 
     return report
