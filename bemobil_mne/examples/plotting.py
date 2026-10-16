@@ -36,7 +36,7 @@ save_path = (
 )
 fname_out = save_path / "testfile"
 
-raw_minimal = mne.io.read_raw(f"{fname_out}_minimal.fif.gz", verbose="error")
+raw_pre_ica = mne.io.read_raw(f"{fname_out}_pre-ICA.fif.gz", verbose="error")
 raw_clean = mne.io.read_raw(f"{fname_out}_clean.fif.gz", verbose="error", preload=True)
 ica = mne.preprocessing.read_ica(f"{fname_out}_ica.fif.gz", verbose="error")
 
@@ -73,8 +73,8 @@ plot_kwargs = {
 
 # Pick the events you want to contrast
 event_list = ["T0", "T2"]
-events = mne.events_from_annotations(raw_minimal)[0]
-event_ids = mne.events_from_annotations(raw_minimal)[1]
+events = mne.events_from_annotations(raw_pre_ica)[0]
+event_ids = mne.events_from_annotations(raw_pre_ica)[1]
 event_id_plotting = {event: event_ids[event] for event in event_list}
 
 # Pick any channels you want
@@ -191,7 +191,7 @@ glue_imgs(savenames, fname_out.parent / f"{fname_out.stem}_topo-COMBINED.png")
 
 # Individual plotting (pass a single raw)
 fig = plot_various_ERPs(
-    raw_minimal,
+    raw_pre_ica,
     event_id=event_id_plotting,
     picks=picks_eeg,
     plot_kwargs=plot_kwargs,
@@ -200,7 +200,7 @@ fig = plot_various_ERPs(
 
 # Group plotting (pass a list of raws)
 fig = plot_various_ERPs(
-    [raw_minimal, raw_clean],
+    [raw_pre_ica, raw_clean],
     event_id=event_id_plotting,
     picks=picks_eeg,
     plot_kwargs=plot_kwargs,

@@ -52,7 +52,7 @@ seed = 869330571  # good practice: pick a random seed via secrets.randbits(31)
 #
 # `run_raw` returns a 3-tuple: (raw_clean, report, metadata).
 # `report` is an `mne.Report` (populated when make_report=True, else None).
-# `metadata` is a dict with keys: raw_minimal, raw_pre_ica, ica, ic_labels,
+# `metadata` is a dict with keys: raw_source, raw_pre_ica, ica, ic_labels,
 # dipoles, residuals, trans, bad_ch_dict.
 #
 # Set fit_dipoles=True to also get dipole fits and trans.
@@ -76,7 +76,7 @@ raw_clean, report, metadata = preprocessor.run_raw(
     fname_out=fname_out,
     overwrite=True,
 )
-raw_minimal = metadata["raw_minimal"]
+raw_source = metadata["raw_source"]
 raw_pre_ica = metadata["raw_pre_ica"]
 ica = metadata["ica"]
 ic_labels = metadata["ic_labels"]
@@ -116,7 +116,7 @@ if do_dipoles:
         trans=None,  # use fsaverage template
         rng_seed=seed,
     ).run_raw(raw, fname_out=fname_out, overwrite=True)
-    raw_minimal = metadata["raw_minimal"]
+    raw_source = metadata["raw_source"]
     raw_pre_ica = metadata["raw_pre_ica"]
     ica = metadata["ica"]
     ic_labels = metadata["ic_labels"]
@@ -140,7 +140,7 @@ raw_clean, report, metadata = EEGPreprocessor(
     # asr=False is the default - ASR is skipped
     rng_seed=seed,
 ).run_raw(raw, fname_out=None)
-raw_minimal = metadata["raw_minimal"]
+raw_source = metadata["raw_source"]
 raw_pre_ica = metadata["raw_pre_ica"]
 ica = metadata["ica"]
 ic_labels = metadata["ic_labels"]
@@ -157,13 +157,13 @@ print(f"Processing took {t_stop - t_start:.2f} seconds.")
 # Above, we assigned outputs of `run_raw` to different variables.
 # If you ran the pipeline before and only have the saved files, read them back:
 
-# Read back minimally processed data
-raw_minimal = mne.io.read_raw(f"{fname_out}_minimal.fif.gz", verbose="error")
+# Read back the source data (input exactly as passed to run_raw, nothing done)
+raw_source = mne.io.read_raw(f"{fname_out}_source.fif.gz", verbose="error")
 
 # Read back ICA cleaned data
 raw_clean = mne.io.read_raw(f"{fname_out}_clean.fif.gz", verbose="error")
 
-# Read back the pre-ICA data (ASR cleaned if asr was enabled)
+# Read back the pre-ICA data (everything but ICA; ASR cleaned if asr was enabled)
 raw_pre_ica = mne.io.read_raw(f"{fname_out}_pre-ICA.fif.gz", verbose="error")
 
 # Read back ICA solution

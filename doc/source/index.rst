@@ -62,7 +62,7 @@ Quick start
 
    # raw_clean : ICA-cleaned, average-referenced, bad channels interpolated
    # report    : mne.Report HTML summary (saved alongside output)
-   # metadata  : dict with raw_minimal, raw_pre_ica, ica, ic_labels, bad_ch_dict, …
+   # metadata  : dict with raw_source, raw_pre_ica, ica, ic_labels, bad_ch_dict, …
 
 ----
 

@@ -2,13 +2,17 @@
 
 # %% Imports
 
+import json
+
 import mne
 import numpy as np
 import pytest
 
 from bemobil_mne.preproc.preprocessing import (
     PRE_ICA_SUFFIX,
+    SOURCE_SUFFIX,
     EEGPreprocessor,
+    _bids_raw_target,
     _output_stem,
     get_bad_chs,
 )
@@ -233,6 +237,10 @@ def test_eegpreprocessor_reapply_ica(tmp_path, sample_raw):
     _, _, metadata = proc.run_raw(sample_raw.copy(), fname_out=fname_out)
 
     assert (tmp_path / f"sub-01_clean{PRE_ICA_SUFFIX}").exists()
+    assert (tmp_path / f"sub-01_clean{SOURCE_SUFFIX}").exists()
+    assert not (tmp_path / "sub-01_clean_minimal.fif.gz").exists()
+    assert "raw_minimal" not in metadata
+    np.testing.assert_allclose(metadata["raw_source"].get_data(), sample_raw.get_data())
 
     auto_exclude = list(metadata["ica"].exclude)
     n_ics = metadata["ica"].n_components_
@@ -302,3 +310,97 @@ def test_eegpreprocessor_provenance_recorded(tmp_path, sample_raw):
     desc = get_descriptor(raw_out)
     assert desc is not None
     assert len(desc["steps"]) > 0
+
+
+# %% save_bids_raw
+
+
+def _deriv_fname(root, name="sub-01_ses-01_task-walk_run-01_eeg.fif.gz"):
+    """Return a derivative path below ``root/derivatives`` like the pipeline uses."""
+    path = root / "derivatives" / "sub-01" / "ses-01" / "eeg" / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def test_bids_raw_target_infers_root_and_entities(tmp_path):
+    """Use the folder above derivatives/ as root and parse entities from the name."""
+    root, ents = _bids_raw_target(_deriv_fname(tmp_path))
+    assert root == tmp_path.resolve()
+    assert ents == {
+        "subject": "01",
+        "session": "01",
+        "task": "walk",
+        "run": "01",
+        "acquisition": None,
+    }
+
+
+def test_bids_raw_target_explicit_root(tmp_path):
+    """An explicit bids_root works outside a derivatives folder."""
+    root, ents = _bids_raw_target(
+        tmp_path / "sub-02_task-rest_eeg.fif.gz", bids_root=tmp_path / "bids"
+    )
+    assert root == tmp_path / "bids"
+    assert ents["subject"] == "02"
+    assert ents["session"] is None
+
+
+def test_bids_raw_target_errors(tmp_path):
+    """Raise when the root cannot be inferred or entities are missing."""
+    with pytest.raises(ValueError, match="derivatives"):
+        _bids_raw_target(tmp_path / "sub-01_task-walk_eeg.fif.gz")
+    with pytest.raises(ValueError, match="task"):
+        _bids_raw_target(_deriv_fname(tmp_path, "sub-01_clean.fif.gz"))
+
+
+def test_save_bids_raw_writes_untouched_data(tmp_path):
+    """Write the input to <root>/sub-*/ses-*/eeg/ with identical data."""
+    raw = _eeg_raw(n_ch=8, duration=5.0)
+    fname_out = _deriv_fname(tmp_path)
+    proc = EEGPreprocessor(loader=None)
+
+    bids_path = proc._save_bids_raw(raw, fname_out)
+
+    eeg_dir = tmp_path / "sub-01" / "ses-01" / "eeg"
+    vhdr = eeg_dir / "sub-01_ses-01_task-walk_run-01_eeg.vhdr"
+    assert bids_path is not None
+    assert vhdr.exists()
+    assert (eeg_dir / "sub-01_ses-01_task-walk_run-01_eeg.json").exists()
+    assert (tmp_path / "dataset_description.json").exists()
+    reread = mne.io.read_raw_brainvision(vhdr, verbose="error")
+    np.testing.assert_allclose(reread.get_data(), raw.get_data(), atol=1e-9)
+    sidecar = json.loads(
+        (eeg_dir / "sub-01_ses-01_task-walk_run-01_eeg.json").read_text()
+    )
+    assert sidecar["PowerLineFrequency"] == 50.0
+
+    # Second call without overwrite_bids_raw leaves the file alone
+    mtime = vhdr.stat().st_mtime
+    assert proc._save_bids_raw(raw, fname_out) is None
+    assert vhdr.stat().st_mtime == mtime
+
+    # overwrite_bids_raw=True replaces it
+    proc_ow = EEGPreprocessor(loader=None, overwrite_bids_raw=True)
+    assert proc_ow._save_bids_raw(raw, fname_out) is not None
+
+
+def test_run_raw_overwrite_does_not_rewrite_bids_raw(tmp_path):
+    """run_raw(overwrite=True) refreshes derivatives but keeps the BIDS raw."""
+    from unittest.mock import patch
+
+    raw = _eeg_raw(n_ch=8, duration=5.0)
+    fname_out = _deriv_fname(tmp_path)
+    proc = EEGPreprocessor(loader=None)
+    proc._save_bids_raw(raw, fname_out)
+
+    with patch("bemobil_mne.io.bids_export.export_to_bids") as mock_export:
+        proc._save_bids_raw(raw, fname_out)
+    mock_export.assert_not_called()
+
+
+def test_save_bids_raw_warns_without_root(tmp_path):
+    """Warn (not raise) when no BIDS root can be determined."""
+    raw = _eeg_raw(n_ch=8, duration=5.0)
+    proc = EEGPreprocessor(loader=None)
+    with pytest.warns(UserWarning, match="save_bids_raw skipped"):
+        assert proc._save_bids_raw(raw, tmp_path / "sub-01_task-walk_eeg.fif") is None

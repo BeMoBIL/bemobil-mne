@@ -714,7 +714,7 @@ def _add_dipole_figures(report, dipoles, ica, residuals, trans, subjects_dir):
 
 
 def make_report(
-    raw_minimal: mne.io.BaseRaw,
+    raw_pre_ica: mne.io.BaseRaw,
     raw_clean: mne.io.BaseRaw,
     ica: mne.preprocessing.ICA,
     ic_labels: dict,
@@ -731,11 +731,17 @@ def make_report(
     pre_hook_description: str | None = None,
     pre_hook_source: str | None = None,
     ica_annots: mne.Annotations | None = None,
+    raw_source: mne.io.BaseRaw | None = None,
 ) -> mne.Report:
     """Build and return an mne.Report for EEGPreprocessor outputs.
 
     Parameters
     ----------
+    raw_pre_ica : mne.io.BaseRaw
+        The data ICA was fitted on (every step except ICA). Used for the
+        montage, annotations, events, and all ICA plots.
+    raw_clean : mne.io.BaseRaw
+        The fully processed recording.
     tier2 : dict | None
         Tier-2 streams from :class:`~bemobil_mne.io.MultimodalRecording`
         (kept at native rate, not merged into ``raw``).  Each stream is
@@ -749,6 +755,13 @@ def make_report(
         after bad-channel detection and break annotation, but before ICA).
         Used to plot a timeline of BAD_* segments that were excluded from
         the ICA fit.
+    raw_source : mne.io.BaseRaw | None
+        The recording exactly as it was passed to the pipeline, before any
+        processing (no renaming, line-noise removal, filtering or
+        re-referencing). Its traces and PSD are shown next to ``raw clean``
+        so the effect of the full pipeline is visible. If ``None`` (e.g. when
+        rebuilding a report from cached outputs without a saved source
+        file), ``raw_pre_ica`` is shown instead.
     """
     # Force headless Agg backend so report generation works without a display
     matplotlib.use("Agg", force=True)
@@ -795,7 +808,7 @@ def make_report(
 
     # --- Montage ---
     try:
-        fig_montage = raw_minimal.plot_sensors(show_names=True, show=False)
+        fig_montage = raw_pre_ica.plot_sensors(show_names=True, show=False)
         report.add_figure(fig_montage, title="Montage", caption="Red = bad channels")
         plt.close(fig_montage)
     except Exception as exc:
@@ -834,15 +847,19 @@ def make_report(
         )
         report.add_html(html, title="Bad channels: line noise")
 
-    # --- Raw traces (minimal + clean) ---
-    for label, src in [("raw minimal", raw_minimal), ("raw clean", raw_clean)]:
+    # --- Raw traces (source + clean) ---
+    if raw_source is not None:
+        first = ("raw source (unprocessed)", raw_source)
+    else:
+        first = ("raw pre-ICA", raw_pre_ica)
+    for label, src in [first, ("raw clean", raw_clean)]:
         raw_eeg = src.copy().pick("eeg")
         report.add_raw(raw_eeg, title=label, psd=True)
         del raw_eeg
 
     # --- Full-length non-EEG Tier-1 stream traces (drop-out inspection) ---
     try:
-        _add_full_length_stream_plots(report, raw_minimal)
+        _add_full_length_stream_plots(report, raw_pre_ica)
     except Exception as exc:
         warnings.warn(f"Skipping full-length Tier-1 stream plots: {exc}")
 
@@ -854,7 +871,7 @@ def make_report(
             warnings.warn(f"Skipping Tier-2 stream plots: {exc}")
 
     # --- Annotation counts ---
-    annot_counts = raw_minimal.annotations.count()
+    annot_counts = raw_pre_ica.annotations.count()
     annot_html = (
         "<p>Annotation counts in the preprocessed data.</p>"
         f"<pre><code>{json.dumps(annot_counts, indent=4)}</code></pre>"
@@ -864,7 +881,7 @@ def make_report(
     # --- Events & Epochs ---
     if event_id is not None:
         try:
-            events, _ = mne.events_from_annotations(raw_minimal, event_id)
+            events, _ = mne.events_from_annotations(raw_pre_ica, event_id)
         except ValueError as err:
             if "not find any of the events" in str(err):
                 events = np.empty((0, 3), dtype=int)
@@ -884,7 +901,7 @@ def make_report(
             events,
             title="Events of interest",
             event_id=event_id,
-            sfreq=raw_minimal.info["sfreq"],
+            sfreq=raw_pre_ica.info["sfreq"],
         )
 
         epo_kwargs = dict(
@@ -895,7 +912,7 @@ def make_report(
             tmax=0.8,
             baseline=(None, 0),
         )
-        inst_epochs = mne.Epochs(raw_minimal, **epo_kwargs)
+        inst_epochs = mne.Epochs(raw_pre_ica, **epo_kwargs)
         raw_clean_lp = raw_clean.copy().filter(l_freq=None, h_freq=20)
         inst_clean = mne.Epochs(raw_clean_lp, **epo_kwargs)
         del raw_clean_lp
@@ -921,7 +938,7 @@ def make_report(
             title="Event ID",
         )
         inst_epochs = mne.make_fixed_length_epochs(
-            raw_minimal, duration=1, preload=True
+            raw_pre_ica, duration=1, preload=True
         )
 
     # --- ICA ---
@@ -934,7 +951,7 @@ def make_report(
                 _add_bad_segments_plot(
                     report,
                     ica_annots,
-                    recording_end=float(raw_minimal.times[-1]),
+                    recording_end=float(raw_pre_ica.times[-1]),
                 )
             except Exception as exc:
                 warnings.warn(f"Skipping pre-ICA bad segments plot: {exc}")
@@ -942,13 +959,13 @@ def make_report(
         report.add_ica(ica, title="ICA", inst=inst_epochs, n_jobs=ICA_REPORT_N_JOBS)
 
         # EOG overlay
-        ch_types = raw_minimal.get_channel_types()
-        eog_chs = [ch for ch, t in zip(raw_minimal.ch_names, ch_types) if t == "eog"]
-        eog_in_data = all(ch in raw_minimal.ch_names for ch in eog_chs)
+        ch_types = raw_pre_ica.get_channel_types()
+        eog_chs = [ch for ch, t in zip(raw_pre_ica.ch_names, ch_types) if t == "eog"]
+        eog_in_data = all(ch in raw_pre_ica.ch_names for ch in eog_chs)
         if eog_chs and eog_in_data:
             try:
                 inst_eye = mne.preprocessing.create_eog_epochs(
-                    raw_minimal, ch_name=eog_chs
+                    raw_pre_ica, ch_name=eog_chs
                 )
                 report._add_ica_overlay(
                     ica=ica,
@@ -976,7 +993,7 @@ def make_report(
         _add_ica_segments(
             report,
             ica=ica,
-            raw=raw_minimal,
+            raw=raw_pre_ica,
             n_segments=5,
             tags=("raw",),
             section="ICA time series",
