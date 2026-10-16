@@ -3,6 +3,7 @@
 # %% Imports
 
 import logging
+import numbers
 import textwrap
 from pathlib import Path
 
@@ -126,22 +127,20 @@ def plot_PSD(
     if ci:
         ci_fun = _get_ci_function_pce(ci, do_topo=False)
 
-    show_sensors = True
-    if not next(iter(inst_dict.values()))[0].info.get("dig"):
-        show_sensors = False
-
-    _ = _check_input_type(inst_dict, domain="freq")
-    psd_dict = _prepare_psd(inst_dict, fmin=fmin, fmax=fmax, picks=None)
+    inst_dict = _check_input_type(inst_dict, domain="freq")
+    psd_dict = _prepare_psd(inst_dict, fmin=fmin, fmax=fmax, picks=picks)
 
     if baseline_dict:
-        _ = _check_input_type(baseline_dict, domain="freq")
-        bl_dict = _prepare_psd(baseline_dict, fmin=fmin, fmax=fmax, picks=None)
+        baseline_dict = _check_input_type(baseline_dict, domain="freq")
+        bl_dict = _prepare_psd(baseline_dict, fmin=fmin, fmax=fmax, picks=picks)
 
-    info = next(iter(inst_dict.values()))[0].info
-    good_chs = [ch for ch in info["ch_names"] if ch not in info["bads"]]
-    info = mne.pick_info(info, mne.pick_channels(info["ch_names"], good_chs))
-    ch_names = picks or info["ch_names"]
-    n_channels = min(con["mean"].shape[0] for con in psd_dict.values())
+    # Channel names come from the computed spectra, so titles always match
+    # the plotted data (bad channels are excluded by compute_psd).
+    ch_names = next(iter(psd_dict.values()))["ch_names"]
+    info = _first_inst(inst_dict).info
+    info = mne.pick_info(info, mne.pick_channels(info["ch_names"], ch_names))
+    show_sensors = bool(info.get("dig"))
+    n_channels = len(ch_names)
 
     for event, cond_dict in psd_dict.items():
         freqs = cond_dict["freqs"]
@@ -164,8 +163,9 @@ def plot_PSD(
         # --- convert everything to dB ---
         if dB:
             cond_dict["mean"] = 10 * np.log10(cond_dict["mean"] + eps)
-            cond_dict["ci_lower"] = 10 * np.log10(cond_dict["ci_lower"] + eps)
-            cond_dict["ci_upper"] = 10 * np.log10(cond_dict["ci_upper"] + eps)
+            if ci:
+                cond_dict["ci_lower"] = 10 * np.log10(cond_dict["ci_lower"] + eps)
+                cond_dict["ci_upper"] = 10 * np.log10(cond_dict["ci_upper"] + eps)
 
     if combine:
         for event, cond_dict in psd_dict.items():
@@ -271,10 +271,10 @@ def plot_psd_topomaps(
         objects (e.g., {"condition": mne.Epochs}).
     unit : str | tuple | None
         Can be either `relative`, `absolute`, `dB`, or a tuple of (fmin, fmax).
-        If `relative`, express band power relative to the total power in the broad
-        reference band (0-45 Hz). If an (fmin, fmax) tuple is provided, that range
-        is used as the reference for normalization. If `absolute` PSD data is shown
-        in µV²/Hz. If `dB`, the PSD is shown in log(µV²/Hz) = dB.
+        If `relative`, express band power as the fraction of the total power in
+        the broad reference band (0-45 Hz). If an (fmin, fmax) tuple is provided,
+        that range is used as the reference for normalization. If `absolute` PSD
+        data is shown in µV²/Hz. If `dB`, the PSD is shown in 10*log10(µV²/Hz).
         Defaults to `relative`.
     bands : dict | None
         Frequency bands to plot as {"Name": (fmin, fmax)}. If None, the default
@@ -283,8 +283,10 @@ def plot_psd_topomaps(
     baseline_dict : dict | None
         An optional dictionary using the same keys as the inst_dict to specify
         baselines e.g., {"condition": mne.Epochs} or {"condition": mne.Spectrum}.
-    kwargs : dict | None
+    plot_kwargs : dict | None
         Additional keyword arguments forwarded to mne.viz.plot_topomap.
+    psd_kwargs : dict | None
+        Additional keyword arguments forwarded to ``compute_psd``.
 
     Returns
     -------
@@ -315,6 +317,7 @@ def plot_psd_topomaps(
         unit = "relative"
         LOGGER.info("No unit specified; defaulting to 'relative'")
 
+    is_relative = isinstance(unit, tuple) or unit == "relative"
     if isinstance(unit, tuple):
         fmin, fmax = unit
         LOGGER.info(
@@ -386,8 +389,7 @@ def plot_psd_topomaps(
             mean_spectrum = mean_spectrum[np.newaxis, :, :]
         full_psd_data[condition] = mean_spectrum
 
-        if unit != "absolute":
-            full_psd_data[condition] *= 1e12  # Convert to µV²/Hz
+        full_psd_data[condition] = mean_spectrum * 1e12  # V²/Hz -> µV²/Hz
 
     for iband, (band_name, (fmin, fmax)) in enumerate(bands.items()):
         psd_band_power[band_name] = {}
@@ -402,17 +404,18 @@ def plot_psd_topomaps(
             band_psds = psds[:, :, freq_mask]
 
             unit_label = "µV²/Hz"
-            if unit == "relative":
-                denom = full_psds.sum(axis=-1, keepdims=True)  # full-spectrum power
+            if is_relative:
+                # Fraction of the reference-band power: band sum / total sum
+                denom = full_psds.sum(axis=-1)  # (n, n_channels)
                 if np.any(denom == 0):
                     raise ValueError(f"Zero power detected in condition '{condition}'")
-                band_psds = band_psds / denom  # relative power
+                mean_power = (band_psds.sum(axis=-1) / denom).mean(axis=0)
                 unit_label = "Relative power"
             elif unit == "dB":
-                band_psds = 10 * np.log10(band_psds)
-                unit_label = "dB"
-
-            mean_power = band_psds.mean(axis=(0, 2))  # (d0=mean over epos if present)
+                mean_power = (10 * np.log10(band_psds)).mean(axis=(0, 2))
+                unit_label = "dB (µV²/Hz)"
+            else:
+                mean_power = band_psds.mean(axis=(0, 2))  # mean over epochs, freqs
             psd_band_power[band_name][condition] = mean_power
             all_data.append(mean_power)
 
@@ -508,7 +511,7 @@ def plot_TFR(
     default_tfr_kwargs = dict(
         method="multitaper",
         freqs=freqs,
-        n_cycles=freqs / 2,
+        n_cycles=np.asarray(freqs) / 2,
         time_bandwidth=2.5,
         use_fft=True,
     )
@@ -542,8 +545,7 @@ def plot_TFR(
         ch_list = [picks]
 
     # Add sensor insets if available
-    is_sources = False
-    if all(["ICA" in ch_name for ch_name in channel_list]):
+    if is_sources or all(["ICA" in ch_name for ch_name in channel_list]):
         # Working with ICA sources
         picks = [f"ICA{i:03}" if isinstance(i, int) else i for i in picks]
         is_sources = True
@@ -716,10 +718,9 @@ def plot_tfr_topomaps(
         )
         times = [(0, 0.2), (0.2, 0.4), (0.4, 0.6), (0.6, 0.8), (0.8, 1.0)]
 
-    if "vlim" not in plot_kwargs:
-        need_vlim = True
-    else:
-        vlim = plot_kwargs.pop("vlim")
+    plot_kwargs = dict(plot_kwargs)  # never modify the caller's dict
+    vlim = plot_kwargs.pop("vlim", None)
+    need_vlim = vlim is None
 
     # check input type and normalize
     if not isinstance(inst_dict, dict):
@@ -844,7 +845,7 @@ def _validate_interval(obj, name):
         a, b = obj[0], obj[1]
     except Exception:
         raise TypeError(f"`{name}` must be sequence-like with two numeric values")
-    if not (isinstance(a, (int | float)) or not isinstance(b, (int | float))):
+    if not all(isinstance(v, numbers.Real) and not isinstance(v, bool) for v in (a, b)):
         raise TypeError(
             f"`{name}` entries must be numbers."
             f"Got {a} and {b} of types {type(a)} and {type(b)}, respectively."
@@ -909,15 +910,14 @@ def plot_ERP(
     --------
     mne.viz.plot_compare_evokeds : For more information on the ERP plotting function
     """
-    if kwargs is None:
-        kwargs = {}
+    kwargs = dict(kwargs or {})  # never modify the caller's dict
 
     if "types" in kwargs:
         types = kwargs.pop("types")
     else:
         types = ["eeg"]
 
-    info = next(iter(inst_dict.values()))[0].info
+    info = _first_inst(inst_dict).info
     channel_list = [
         ch for ch in info.ch_names if info.get_channel_types(picks=[ch])[0] in types
     ]
@@ -1099,7 +1099,8 @@ def plot_various_ERPs(
         default_epochs_kwargs.update(epochs_kwargs)
     epochs_kwargs = default_epochs_kwargs
 
-    # initialize variables
+    # initialize variables (work on copies: event_id is edited below)
+    event_id = dict(event_id)
     epochs = []
     event_list = list(event_id.keys())
     evokeds_dict = {event: [] for event in event_list}
@@ -1121,7 +1122,8 @@ def plot_various_ERPs(
         # resample to nominal sampling frequency
         events, _ = mne.events_from_annotations(inst, event_id=event_id)
         if sfreq is not None and inst.info["sfreq"] != sfreq:
-            inst, events = inst.resample(sfreq, npad="auto", events=events)
+            # resample() works in place; keep the caller's raw untouched
+            inst, events = inst.copy().resample(sfreq, npad="auto", events=events)
 
         # epoch the data -- either eeg channel or IC sources
         epochs = mne.Epochs(
@@ -1488,6 +1490,12 @@ def plot_butterfly(inst_dict, ylim=None, ts_kwargs=None):
 # %% Helper functions
 
 
+def _first_inst(inst_dict):
+    """Return the first instance of *inst_dict* (unwrapping lists)."""
+    first = next(iter(inst_dict.values()))
+    return first[0] if isinstance(first, list) else first
+
+
 def _check_input_type(inst_dict, domain):
     """Check type of inst_dict values and convert to list of evokeds if epochs."""
     dict_warning = (
@@ -1596,7 +1604,7 @@ def _prepare_psd(
         "bandwidth": None,
         "adaptive": False,
         "low_bias": True,
-        "normalization": "full",
+        "normalization": "length",  # PSD in V²/Hz ("full" also divides by sfreq)
         "verbose": False,
         "method": "multitaper",
     }
@@ -1605,7 +1613,7 @@ def _prepare_psd(
     kwargs = default_kwargs
 
     for key, entries in inst_dict.items():
-        if isinstance(entries, mne.Epochs | mne.Evoked):
+        if isinstance(entries, mne.BaseEpochs | mne.Evoked):
             psds = [entries.compute_psd(fmin=fmin, fmax=fmax, picks=picks, **kwargs)]
             psd_dict[key] = psds
 
@@ -1618,17 +1626,23 @@ def _prepare_psd(
             psd_dict[key] = psds
 
     freqs = psds[0].freqs
-    unit = psds[0].units()["eeg"]
+    units = psds[0].units()
+    unit = units.get("eeg", next(iter(units.values())))
+    ch_names = psds[0].ch_names
 
     for event, psds in psd_dict.items():
         all_psds = []
         for psd in psds:
-            data = psd.get_data()  # shape: (n_epochs, n_channels, n_freqs)
-            all_psds.append(data.mean(axis=0))  # average over epochs
+            data = psd.get_data()  # (n_epochs, n_channels, n_freqs) or (n_ch, n_f)
+            if data.ndim == 3:  # Epochs: average over epochs; Evoked has none
+                data = data.mean(axis=0)
+            all_psds.append(data)
 
         all_psds = np.stack(all_psds, axis=0)  # shape: (n_subs, n_channels, n_freqs)
         mean_psd = all_psds.mean(axis=0)  # (n_channels, n_freqs)
-        psd_dict[event] = dict(mean=mean_psd, all=all_psds, freqs=freqs, unit=unit)
+        psd_dict[event] = dict(
+            mean=mean_psd, all=all_psds, freqs=freqs, unit=unit, ch_names=ch_names
+        )
 
     return psd_dict
 
@@ -1669,6 +1683,8 @@ def _prepare_tfr(
     """
 
     def _baseline_crop_tfr(tfr, tmin, tmax, baseline):
+        if baseline is not None or tmin is not None or tmax is not None:
+            tfr = tfr.copy()  # apply_baseline/crop work in place
         if baseline is not None:
             LOGGER.info(f"Applying baseline correction: {baseline}")
             tfr.apply_baseline(baseline=baseline, mode="logratio")
@@ -1680,7 +1696,7 @@ def _prepare_tfr(
     default_tfr_kwargs = dict(
         method="multitaper",
         freqs=freqs,
-        n_cycles=freqs / 2,
+        n_cycles=np.asarray(freqs) / 2,
         time_bandwidth=2.5,
         use_fft=True,
     )
@@ -1718,7 +1734,7 @@ def _prepare_tfr(
                     )
                     temp_list.append(_baseline_crop_tfr(inst, tmin, tmax, baseline))
                 # case: list of Epochs
-                elif isinstance(inst, mne.Epochs):
+                elif isinstance(inst, mne.BaseEpochs):
                     LOGGER.info(f"Epochs were passed. Computing TFR for {key} - {inst}")
                     temp_list.append(
                         _baseline_crop_tfr(
@@ -1744,7 +1760,7 @@ def _prepare_tfr(
             # case: single AverageTFR
             LOGGER.info(f"AverageTFRs were passed. Continuing for {key} - {inst_list}")
             tfr_dict[key] = _baseline_crop_tfr(inst_list, tmin, tmax, baseline)
-        elif isinstance(inst_list, mne.Epochs):
+        elif isinstance(inst_list, mne.BaseEpochs):
             # case: single Epochs
             LOGGER.info(f"Epochs were passed. Computing TFR for {key} - {inst_list}")
             tfr_dict[key] = _baseline_crop_tfr(
