@@ -51,6 +51,17 @@ _DEFAULT_INCLUDE_LABELS = frozenset(
 # %% Functions
 
 
+def _template_montage_1005():
+    """Return the 10-05 template montage for the installed MNE version.
+
+    MNE 1.13 renamed ``standard_1005`` to ``colin27_1005`` (the old name is
+    removed in MNE 1.14).
+    """
+    if "colin27_1005" in mne.channels.get_builtin_montages():
+        return mne.channels.make_standard_montage("colin27_1005")
+    return mne.channels.make_standard_montage("standard_1005")
+
+
 def _output_stem(fname_out):
     """Return *fname_out* without its ``.fif`` / ``.fif.gz`` extension."""
     fname_out = Path(fname_out)
@@ -714,8 +725,9 @@ class EEGPreprocessor:
         discarded (call :meth:`run_raw` directly if you need it).
 
         The montage set by the loader is kept. Only when the loaded data
-        has no montage is the ``standard_1005`` template applied (channels
-        not in the template get a warning).
+        has no montage is the 10-05 template applied (``colin27_1005``,
+        named ``standard_1005`` before MNE 1.13); channels not in the
+        template get a warning.
 
         Parameters
         ----------
@@ -742,10 +754,7 @@ class EEGPreprocessor:
         if raw.get_montage() is None:
             # Fall back to standard 10-05 positions only when the loader did
             # not set a montage (e.g. XDFLoader(montage=...)).
-            raw.set_montage(
-                mne.channels.make_standard_montage("standard_1005"),
-                on_missing="warn",
-            )
+            raw.set_montage(_template_montage_1005(), on_missing="warn")
         return self.run_raw(
             raw, fname_out=fname_out, overwrite=overwrite, tier2=rec.tier2
         )
