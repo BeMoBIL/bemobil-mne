@@ -35,7 +35,7 @@ LINE_FREQ = 60.0  # PhysioNet data recorded in the USA
 
 raws = []
 for run in RUNS:
-    fnames = eegbci.load_data(subject=SUBJECT_ID, runs=[run])
+    fnames = eegbci.load_data(subject=SUBJECT_ID, runs=[run], update_path=True)
     raw = mne.io.read_raw_edf(fnames[0], preload=True, verbose=False)
     eegbci.standardize(raw)  # rename channels to 10-20 labels
     # "colin27_1005" was called "standard_1005" before MNE 1.13

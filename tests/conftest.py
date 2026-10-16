@@ -102,7 +102,11 @@ def sample_raw():
     """
     subjects = [1]
     runs = [6]
-    raws = mne.datasets.eegbci.load_data(subjects[0], runs, verbose=False)
+    # update_path=False: otherwise MNE asks interactively whether to store the
+    # dataset path in its config, which fails under pytest (stdin captured).
+    raws = mne.datasets.eegbci.load_data(
+        subjects[0], runs, update_path=False, verbose=False
+    )
     raw = mne.io.concatenate_raws(
         [mne.io.read_raw_edf(f, preload=True, verbose=False) for f in raws]
     )
