@@ -25,7 +25,6 @@ from bemobil_mne.preproc.utils import (
     compute_ica,
     detect_bad_by_line_noise,
     fit_dipoles_on_ica,
-    get_raw_subset,
     init_descriptor,
     remove_line,
     set_descriptor,
@@ -370,10 +369,6 @@ class EEGPreprocessor:
     filter_bands : tuple of float
         ``(l_freq, h_freq)`` for the main bandpass filter applied to
         ``raw_minimal``.
-    subset_chs : list of str | None
-        Channels for the ``raw_subset`` output (minimally processed, without
-        average reference).  Defaults to some central and frontal channels when
-        ``None`` but produces ``None`` if none are found in the data.
     asr : bool | dict
         Controls Artifact Subspace Reconstruction (ASR).
 
@@ -467,7 +462,6 @@ class EEGPreprocessor:
         annotate_breaks: bool = False,
         annotate_break_kwargs: dict | None = None,
         filter_bands: tuple[float | None, float | None] = (0.1, 100.0),
-        subset_chs: list | None = None,
         asr: bool | dict = False,
         filter_bands_ica: tuple[float | None, float | None] = (1.75, None),
         downsample_ica: float | None = 250.0,
@@ -524,7 +518,6 @@ class EEGPreprocessor:
         self.annotate_breaks = annotate_breaks
         self.annotate_break_kwargs = annotate_break_kwargs
         self.filter_bands = filter_bands
-        self.subset_chs = subset_chs
         self.asr = asr
         self.filter_bands_ica = filter_bands_ica
         self.downsample_ica = downsample_ica
@@ -621,7 +614,7 @@ class EEGPreprocessor:
             Quality report (populated when ``make_report=True``, else ``None``).
         metadata : dict
             All other pipeline outputs keyed by name:
-            ``raw_minimal``, ``raw_pre_ica``, ``raw_subset``, ``ica``,
+            ``raw_minimal``, ``raw_pre_ica``, ``ica``,
             ``ic_labels``, ``dipoles``, ``residuals``, ``trans``,
             ``bad_ch_dict``.
         """
@@ -765,16 +758,6 @@ class EEGPreprocessor:
         raw_minimal.set_eeg_reference(ref_channels="average", projection=True)
         append_desc(raw_minimal, name="avg_ref_projection")
         timer.log_step("minimal_processing", time.perf_counter() - t0)
-
-        # --- Channel subset (from minimal, no avg-ref applied) ---
-        raw_subset = get_raw_subset(raw_minimal, subset_chs=self.subset_chs)
-        if raw_subset is not None:
-            raw_subset.del_proj()
-            append_desc(
-                raw_subset,
-                name="subset_selection",
-                channels=raw_subset.ch_names,
-            )
 
         # --- ASR ---
         t0 = time.perf_counter()
@@ -929,7 +912,6 @@ class EEGPreprocessor:
                 raw_minimal=raw_minimal,
                 raw_clean=raw_clean,
                 raw_pre_ica=raw_pre_ica,
-                raw_subset=raw_subset,
                 ica=ica,
                 ic_labels=ic_labels,
                 dipoles=dipoles,
@@ -950,7 +932,6 @@ class EEGPreprocessor:
         metadata = {
             "raw_minimal": raw_minimal,
             "raw_pre_ica": raw_pre_ica,
-            "raw_subset": raw_subset,
             "ica": ica,
             "ic_labels": ic_labels,
             "dipoles": dipoles,
@@ -970,7 +951,6 @@ class EEGPreprocessor:
         raw_minimal,
         raw_clean,
         raw_pre_ica,
-        raw_subset,
         ica,
         ic_labels,
         dipoles,
@@ -999,12 +979,6 @@ class EEGPreprocessor:
         if self.asr is not False or self.fit_ica:
             raw_pre_ica.save(
                 stem.with_name(stem.name + PRE_ICA_SUFFIX),
-                overwrite=overwrite,
-                verbose="error",
-            )
-        if raw_subset is not None:
-            raw_subset.save(
-                stem.with_name(stem.name + "_minimal-subset.fif.gz"),
                 overwrite=overwrite,
                 verbose="error",
             )
@@ -1071,13 +1045,6 @@ class EEGPreprocessor:
         else:
             raw_pre_ica = raw_minimal
 
-        _subset_path = stem.with_name(stem.name + "_minimal-subset.fif.gz")
-        raw_subset = (
-            mne.io.read_raw(_subset_path, verbose="error")
-            if _subset_path.exists()
-            else None
-        )
-
         _ica_path = stem.with_name(stem.name + "_ica.fif.gz")
         ica = (
             mne.preprocessing.read_ica(_ica_path, verbose="error")
@@ -1136,7 +1103,6 @@ class EEGPreprocessor:
         metadata = {
             "raw_minimal": raw_minimal,
             "raw_pre_ica": raw_pre_ica,
-            "raw_subset": raw_subset,
             "ica": ica,
             "ic_labels": ic_labels,
             "dipoles": dipoles,
