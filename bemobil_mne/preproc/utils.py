@@ -624,20 +624,27 @@ def compute_ica(
     }
 
     labels = ic_labels["labels"]
-    probas = ic_labels["y_pred_proba"]  # shape: (n_components, n_classes)
+    probas = ic_labels["y_pred_proba"]  # winning-class probability per IC
 
     popularity_vote = float(thresh) < 0
 
     if popularity_vote:
-        # Assign each IC to the class with the highest probability; exclude
-        # those that do not belong to a "keep" class.
-        # `labels` already holds the winning label per IC - no need to recompute
-        # it from probas (which avoids an index error where np.argmax would
-        # return a class index (0-6) used to index the component-labels list).
-        _keep = (
-            set(include_labels) if include_labels is not None else {"brain", "other"}
-        )
-        exclude_idx = [idx for idx, label in enumerate(labels) if label not in _keep]
+        # Each IC is assigned to the class with the highest probability
+        # (`labels` already holds that winning label). Exclude ICs whose
+        # class is in exclude_labels or, otherwise, not in the keep set.
+        if exclude_labels is not None:
+            exclude_idx = [
+                idx for idx, label in enumerate(labels) if label in exclude_labels
+            ]
+        else:
+            _keep = (
+                set(include_labels)
+                if include_labels is not None
+                else {"brain", "other"}
+            )
+            exclude_idx = [
+                idx for idx, label in enumerate(labels) if label not in _keep
+            ]
     elif exclude_labels is not None:
         exclude_idx = [
             idx

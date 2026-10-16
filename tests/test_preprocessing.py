@@ -482,3 +482,19 @@ def test_get_bad_chs_none_skips_notch():
     with patch.object(mne.io.BaseRaw, "notch_filter") as notch:
         get_bad_chs(raw, notch_lines=None)
     notch.assert_not_called()
+
+
+def test_eegpreprocessor_label_defaults():
+    """exclude_labels works alone; include_labels defaults to all but eye blink."""
+    proc = EEGPreprocessor(loader=None, exclude_labels=["eye blink"])
+    assert proc.include_labels is None
+    assert proc.exclude_labels == ["eye blink"]
+
+    proc = EEGPreprocessor(loader=None)
+    assert "eye blink" not in proc.include_labels
+    assert "brain" in proc.include_labels
+
+    with pytest.raises(ValueError, match="either exclude_labels or include_labels"):
+        EEGPreprocessor(
+            loader=None, exclude_labels=["eye blink"], include_labels={"brain"}
+        )

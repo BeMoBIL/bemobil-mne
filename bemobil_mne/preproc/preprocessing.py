@@ -36,6 +36,18 @@ NumpyEncoder = _NumpyEncoder
 
 LOGGER = logging.getLogger(__name__)
 
+# All ICLabel classes except "eye blink" (BeMoBIL: iclabel_classes = [1 2 4 5 6 7])
+_DEFAULT_INCLUDE_LABELS = frozenset(
+    {
+        "brain",
+        "muscle artifact",
+        "heart beat",
+        "line noise",
+        "channel noise",
+        "other",
+    }
+)
+
 # %% Functions
 
 
@@ -520,9 +532,10 @@ class EEGPreprocessor:
         ICLabel categories to exclude. Mutually exclusive with
         *include_labels*.
     include_labels : set of str | None
-        ICLabel categories to keep; all others are excluded.  Defaults to
-        all classes except ``"eye blink"`` (matching BeMoBIL's
-        ``iclabel_classes = [1 2 4 5 6 7]``). Mutually exclusive with
+        ICLabel categories to keep; all others are excluded. ``None``
+        (default) means all classes except ``"eye blink"`` (matching
+        BeMoBIL's ``iclabel_classes = [1 2 4 5 6 7]``), unless
+        *exclude_labels* is given. Mutually exclusive with
         *exclude_labels*.
     fit_dipoles : bool
         If ``True``, fit a dipole to each ICA component topography using the
@@ -596,16 +609,7 @@ class EEGPreprocessor:
         reject_by_annotation: bool = True,
         thresh: float = -1,
         exclude_labels: list | None = None,
-        include_labels: set | None = frozenset(
-            {
-                "brain",
-                "muscle artifact",
-                "heart beat",
-                "line noise",
-                "channel noise",
-                "other",
-            }
-        ),
+        include_labels: set | None = None,
         fit_dipoles: bool = False,
         trans: object = None,
         rv_thresh: float | None = None,
@@ -624,6 +628,13 @@ class EEGPreprocessor:
                 "Cannot fit dipoles without fitting ICA. "
                 "Set fit_ica=True or fit_dipoles=False."
             )
+
+        if exclude_labels is not None and include_labels is not None:
+            raise ValueError(
+                "Specify either exclude_labels or include_labels, not both."
+            )
+        if exclude_labels is None and include_labels is None:
+            include_labels = _DEFAULT_INCLUDE_LABELS
 
         # Validate line_noise_freq early so errors surface at construction time
         if isinstance(line_noise_freq, str) and line_noise_freq not in (
