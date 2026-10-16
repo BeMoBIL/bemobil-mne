@@ -26,7 +26,7 @@ XDF_PATH = "/path/to/your/recording.xdf"  # <-- set this before running
 loader = XDFLoader(
     eeg_stream_name="BrainVision RDA",
     eeg_stream_type="EEG",
-    montage="standard_1020",
+    montage="easycap-M1",
     old_reference="FCz",
     special_streams={
         # ECG amplifier at ~1000 Hz - use sinc (anti-aliasing + PCHIP)

@@ -22,7 +22,7 @@ from bemobil_mne.preproc.preprocessing import (
 def _eeg_raw(n_ch=32, sfreq=500.0, duration=30.0, rng_seed=0, with_montage=True):
     """Create a minimal EEG Raw."""
     rng = np.random.default_rng(rng_seed)
-    montage = mne.channels.make_standard_montage("standard_1020")
+    montage = mne.channels.make_standard_montage("easycap-M1")
     if with_montage:
         ch_names = montage.ch_names[:n_ch]
     else:

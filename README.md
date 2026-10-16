@@ -51,7 +51,7 @@ from bemobil_mne.io import XDFLoader
 from bemobil_mne.preproc import EEGPreprocessor, find_rigid_bodies
 
 # Load a multimodal XDF recording
-loader = XDFLoader(montage="standard_1020")
+loader = XDFLoader(montage="easycap-M1")  # or a path to your .elc/.fif
 recording = loader.load("sub-01_task-walk_run-01.xdf")
 raw = recording.raw
 ```

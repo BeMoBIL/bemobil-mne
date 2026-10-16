@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).parents[2]))
 # -- Project information -----------------------------------------------------
 
 project = "BeMoBIL-MNE"
-copyright = "2026, BeMoBIL"
+copyright = "2026, BeMoBIL"  # noqa: A001 (Sphinx setting)
 author = "Roy Eric Wieske"
 
 try:

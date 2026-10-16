@@ -11,15 +11,39 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test:
+  lint:
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Ruff
+        run: |
+          pip install ruff
+          ruff check .
+          ruff format --check .
+
+  test:
+    # Oldest and newest supported Python on Linux, plus Windows
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            python-version: "3.11"
+          - os: ubuntu-latest
+            python-version: "3.13"
+          - os: windows-latest
+            python-version: "3.13"
     steps:
       - uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python-version }}
           cache: pip
 
       - name: Install package and test dependencies
@@ -34,7 +58,33 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-results
+          name: test-results-${{ matrix.os }}-py${{ matrix.python-version }}
           path: |
             junit-results.xml
             htmlcov/
+
+  slow:
+    # End-to-end pipeline runs on PhysioNet data; only on pushes to main,
+    # not on every pull request update
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install package and test dependencies
+        run: |
+          pip install -e ".[test]"
+
+      - name: Download test data
+        run: |
+          python -c "import mne; mne.datasets.eegbci.load_data(1, [6], update_path=True)"
+
+      - name: Run slow tests
+        run: |
+          pytest --runslow -m slowtest

@@ -16,11 +16,11 @@ from bemobil_mne.preproc.utils import (
     build_sys_info,
     compute_asr,
     compute_mi_reduction,
-    remove_line,
     detect_bad_by_line_noise,
     format_duration,
     get_descriptor,
     init_descriptor,
+    remove_line,
     set_descriptor,
     sig_params,
 )

@@ -249,7 +249,7 @@ from bemobil_mne.io import XDFLoader
 
 loader = XDFLoader(
     eeg_stream_type="EEG",
-    montage="standard_1005",
+    montage="easycap-M1",
     drop_channels=["x_dir", "y_dir", "z_dir"],
     target_sfreq=500.0,
     # Tier-1: align ECG and gaze into the Raw object

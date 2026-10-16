@@ -21,7 +21,7 @@ from bemobil_mne.io.bids_export import (
 def _minimal_raw(n_ch=4, sfreq=250.0, duration=5.0, rng_seed=0):
     """Return a minimal EEG Raw with montage."""
     rng = np.random.default_rng(rng_seed)
-    montage = mne.channels.make_standard_montage("standard_1020")
+    montage = mne.channels.make_standard_montage("easycap-M1")
     ch_names = montage.ch_names[:n_ch]
     info = mne.create_info(ch_names, sfreq=sfreq, ch_types="eeg")
     n_times = int(sfreq * duration)

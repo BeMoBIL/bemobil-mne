@@ -3,6 +3,7 @@
 # %% Imports
 
 import subprocess
+import sys
 
 import mne
 import numpy as np
@@ -34,13 +35,13 @@ def tiny_raw(rng):
 
 @pytest.fixture
 def tiny_raw_with_montage(rng):
-    """16-channel EEG Raw with standard_1020 montage (250 Hz, 10 s).
+    """16-channel EEG Raw with easycap-M1 montage (250 Hz, 10 s).
 
     Use when channel positions are required (e.g. BIDS export, dipole fitting).
     """
     sfreq = 250.0
     n_times = int(sfreq * 10)
-    montage = mne.channels.make_standard_montage("standard_1020")
+    montage = mne.channels.make_standard_montage("easycap-M1")
     # pick first 16 channels that exist in the montage
     ch_names = montage.ch_names[:16]
     info = mne.create_info(ch_names=ch_names, sfreq=sfreq, ch_types="eeg")
@@ -101,12 +102,22 @@ def sample_raw():
     """
     subjects = [1]
     runs = [6]
-    raws = mne.datasets.eegbci.load_data(subjects[0], runs, verbose=False)
+    # update_path=False: otherwise MNE asks interactively whether to store the
+    # dataset path in its config, which fails under pytest (stdin captured).
+    raws = mne.datasets.eegbci.load_data(
+        subjects[0], runs, update_path=False, verbose=False
+    )
     raw = mne.io.concatenate_raws(
         [mne.io.read_raw_edf(f, preload=True, verbose=False) for f in raws]
     )
     mne.datasets.eegbci.standardize(raw)
-    montage = mne.channels.make_standard_montage("standard_1020")
+    # MNE 1.13 renamed standard_1020 to colin27_1020 (old name gone in 1.14)
+    name = (
+        "colin27_1020"
+        if "colin27_1020" in mne.channels.get_builtin_montages()
+        else "standard_1020"
+    )
+    montage = mne.channels.make_standard_montage(name)
     raw.set_montage(montage, on_missing="ignore")
     return raw
 
@@ -147,7 +158,7 @@ def pytest_collection_modifyitems(config, items):
 def pytest_sessionfinish(session, exitstatus):
     """Print a brief coverage summary after the test run."""
     result = subprocess.run(
-        ["python", "-m", "coverage", "report", "--skip-empty"],
+        [sys.executable, "-m", "coverage", "report", "--skip-empty"],
         capture_output=True,
         text=True,
     )
