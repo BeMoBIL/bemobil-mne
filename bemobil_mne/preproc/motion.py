@@ -5,8 +5,9 @@ Implements kinematics processing equivalent to BeMoBIL's
 
 1. Identify rigid body channel groups from naming conventions (quaternion or
    Euler suffixes).
-2. Optionally low-pass filter the position / orientation signals.
-3. Convert unit quaternions to Euler angles (roll / pitch / yaw) when needed.
+2. Convert unit quaternions to Euler angles (roll / pitch / yaw) when needed
+   and unwrap them over time.
+3. Optionally resample and low-pass filter the position / orientation signals.
 4. Compute first derivative (velocity) with optional low-pass filtering.
 5. Compute second derivative (acceleration) with optional low-pass filtering.
 
@@ -81,18 +82,21 @@ def process_rigid_body(
     compute_velocity=True,
     compute_acceleration=True,
     sfreq_target=None,
+    unwrap=True,
 ):
     """Process rigid body motion capture streams.
 
     For each rigid body found in *raw*:
 
-    1. Optionally low-pass filter the orientation (and position) signals.
-    2. Convert quaternions to Euler angles (ZYX convention = yaw-pitch-roll)
+    1. Convert quaternions to Euler angles (ZYX convention = yaw-pitch-roll)
        if quaternion channels are present.  The source quaternion channels are
        dropped and replaced by Euler angle channels.
-    3. Compute the first derivative (velocity) via finite differences, with an
+    2. Unwrap the Euler angles (see *unwrap*).
+    3. Optionally resample all channels to *sfreq_target*.
+    4. Optionally low-pass filter the orientation (and position) signals.
+    5. Compute the first derivative (velocity) via finite differences, with an
        optional low-pass filter applied after differentiation.
-    4. Compute the second derivative (acceleration) in the same way.
+    6. Compute the second derivative (acceleration) in the same way.
 
     Derivative channels are appended to the returned raw object with the
     naming scheme ``<rb>_<type>_vel_<axis>`` and ``<rb>_<type>_acc_<axis>``,
@@ -121,8 +125,15 @@ def process_rigid_body(
     compute_acceleration : bool
         Whether to compute and append acceleration channels.
     sfreq_target : float | None
-        If not ``None``, resample motion channels to this rate before
-        differentiation.  Useful to match the EEG sample rate.
+        If not ``None``, resample the recording to this rate after the
+        quaternion conversion and before filtering and differentiation.
+        Useful to match the EEG sample rate.
+    unwrap : bool
+        If ``True`` (default), unwrap the Euler angles over time
+        (:func:`numpy.unwrap`), as in BeMoBIL.  Angles wrap at ±π, so a
+        continuous rotation otherwise produces jumps of 2π that dominate
+        the filtered signal and its derivatives.  The returned orientation
+        channels are then continuous and may exceed ±π.
 
     Returns
     -------
@@ -131,10 +142,9 @@ def process_rigid_body(
         velocity / acceleration channels appended.
     rb_info : dict
         Per-rigid-body processing summary:
-        ``{rb_name: {"mode": "quat"|"euler", "channels": list[str]}}``.
+        ``{rb_name: {"mode": "quat->euler"|"euler", "channels": list[str]}}``.
     """
-    raw_out = raw.copy()
-    sfreq = raw_out.info["sfreq"]
+    raw_out = raw.copy().load_data()
 
     if rb_names is None:
         rb_names = find_rigid_bodies(raw_out)
@@ -143,15 +153,12 @@ def process_rigid_body(
         LOGGER.warning("process_rigid_body: no rigid body channels found.")
         return raw_out, {}
 
-    rb_info: dict = {}
-
+    # ------------------------------------------------------------------
+    # Pass 1: orientation as (unwrapped) Euler angles for every rigid body
+    # ------------------------------------------------------------------
+    rb_channels: dict = {}
     for rb in rb_names:
         LOGGER.info(f"Processing rigid body: {rb}")
-        info_entry: dict = {}
-
-        # ----------------------------------------------------------------
-        # Detect channel mode
-        # ----------------------------------------------------------------
         quat_chs = [
             f"{rb}{s}" for s in _QUAT_SUFFIXES if f"{rb}{s}" in raw_out.ch_names
         ]
@@ -162,70 +169,71 @@ def process_rigid_body(
             LOGGER.warning(f"  {rb}: no orientation channels found, skipping.")
             continue
 
-        orient_chs: list[str]
-        mode: str
-
         if quat_chs:
-            mode = "quat"
-            # ----------------------------------------------------------------
-            # Quaternion → Euler conversion
-            # ----------------------------------------------------------------
-            q_idx = [raw_out.ch_names.index(ch) for ch in quat_chs]
+            if len(quat_chs) != len(_QUAT_SUFFIXES):
+                missing = sorted(
+                    f"{rb}{s}" for s in _QUAT_SUFFIXES if f"{rb}{s}" not in quat_chs
+                )
+                raise ValueError(
+                    f"Rigid body '{rb}' has incomplete quaternion channels; "
+                    f"missing {missing}."
+                )
             # Order: x, y, z, w
-            q_data = raw_out.get_data(picks=q_idx)  # (4, n_times)
-            # Normalise quaternions row-wise
+            q_data = raw_out.get_data(picks=quat_chs)  # (4, n_times)
             q_norm = np.linalg.norm(q_data, axis=0, keepdims=True)
             q_data = q_data / np.where(q_norm > 1e-10, q_norm, 1.0)
-
             euler_data = _quat_to_euler_zyx(q_data)  # (3, n_times)
+            if unwrap:
+                euler_data = np.unwrap(euler_data, axis=1)
 
-            # Build new Euler channel info
             new_ch_names = [f"{rb}_eul_x", f"{rb}_eul_y", f"{rb}_eul_z"]
-            new_info = mne.create_info(
-                ch_names=new_ch_names,
-                sfreq=sfreq,
-                ch_types=["misc"] * 3,
+            euler_raw = mne.io.RawArray(
+                euler_data,
+                mne.create_info(new_ch_names, raw_out.info["sfreq"], ["misc"] * 3),
+                verbose=False,
             )
-            euler_raw = mne.io.RawArray(euler_data, new_info, verbose=False)
             euler_raw.set_meas_date(raw_out.info["meas_date"])
 
-            # Drop original quaternion channels and append Euler channels
-            raw_out.drop_channels(quat_chs)
+            # Add the Euler channels before dropping the quaternions, so a
+            # recording that only holds this rigid body never becomes empty.
             raw_out.add_channels([euler_raw], force_update_info=True)
-
-            orient_chs = new_ch_names
-            info_entry["mode"] = "quat->euler"
-
+            raw_out.drop_channels(quat_chs)
+            orient_chs, mode = new_ch_names, "quat->euler"
         else:
-            mode = "euler"
-            orient_chs = eul_chs
-            info_entry["mode"] = "euler"
+            orient_chs, mode = eul_chs, "euler"
+            if unwrap:
+                idx = [raw_out.ch_names.index(ch) for ch in orient_chs]
+                raw_out._data[idx] = np.unwrap(raw_out._data[idx], axis=1)
 
-        # ----------------------------------------------------------------
-        # Low-pass filter orientation
-        # ----------------------------------------------------------------
+        rb_channels[rb] = (orient_chs, pos_chs, mode)
+
+    # ------------------------------------------------------------------
+    # Optional resampling (after conversion: quaternions must not be
+    # interpolated component-wise because of q / -q sign flips)
+    # ------------------------------------------------------------------
+    if sfreq_target is not None and sfreq_target != raw_out.info["sfreq"]:
+        raw_out.resample(sfreq_target)
+    sfreq = raw_out.info["sfreq"]
+
+    # ------------------------------------------------------------------
+    # Pass 2: filtering and derivatives
+    # ------------------------------------------------------------------
+    rb_info: dict = {}
+    for rb, (orient_chs, pos_chs, mode) in rb_channels.items():
         if lowpass_orient is not None:
             orient_idx = [raw_out.ch_names.index(ch) for ch in orient_chs]
             raw_out._data[orient_idx] = _lowpass_array(
                 raw_out._data[orient_idx], sfreq, lowpass_orient
             )
 
-        # ----------------------------------------------------------------
-        # Low-pass filter position
-        # ----------------------------------------------------------------
         if pos_chs and lowpass_pos is not None:
             pos_idx = [raw_out.ch_names.index(ch) for ch in pos_chs]
             raw_out._data[pos_idx] = _lowpass_array(
                 raw_out._data[pos_idx], sfreq, lowpass_pos
             )
 
-        # ----------------------------------------------------------------
-        # Derivatives
-        # ----------------------------------------------------------------
         all_src_chs = orient_chs + pos_chs
-        all_ch_idx = [raw_out.ch_names.index(ch) for ch in all_src_chs]
-        src_data = raw_out.get_data(picks=all_ch_idx)  # (n_chs, n_times)
-
+        src_data = raw_out.get_data(picks=all_src_chs)  # (n_chs, n_times)
         appended_chs: list[str] = list(orient_chs) + list(pos_chs)
 
         if compute_velocity:
@@ -256,8 +264,7 @@ def process_rigid_body(
                 raw_out.add_channels([acc_raw], force_update_info=True)
                 appended_chs.extend(acc_names)
 
-        info_entry["channels"] = appended_chs
-        rb_info[rb] = info_entry
+        rb_info[rb] = {"mode": mode, "channels": appended_chs}
         LOGGER.info(f"  {rb}: processed ({mode}), channels: {appended_chs}")
 
     return raw_out, rb_info
