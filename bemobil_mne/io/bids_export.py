@@ -98,7 +98,9 @@ def export_to_bids(
         datatype="eeg",
     )
 
-    # Set power-line frequency in info (required by BIDS validator)
+    # Set power-line frequency in info (required by BIDS validator) on a copy,
+    # so the caller's object is only touched by the provenance entry below.
+    raw_in = raw
     raw = raw.copy()
     raw.info["line_freq"] = float(line_freq)
 
@@ -124,13 +126,13 @@ def export_to_bids(
     bids_path_out = mne_bids.write_raw_bids(**write_kwargs)
     LOGGER.info(f"BIDS export complete: {bids_path_out.fpath}")
 
-    # Record in provenance if descriptor exists
+    # Record in the caller's provenance descriptor, if it has one
     try:
         from bemobil_mne.preproc.utils import append_desc, get_descriptor
 
-        if get_descriptor(raw) is not None:
+        if get_descriptor(raw_in) is not None:
             append_desc(
-                raw,
+                raw_in,
                 name="bids_export",
                 bids_path=str(bids_path_out.fpath),
                 subject=subject,
@@ -138,8 +140,8 @@ def export_to_bids(
                 task=task,
                 run=run,
             )
-    except Exception:
-        pass  # provenance recording is best-effort
+    except Exception as exc:  # provenance recording is best-effort
+        LOGGER.warning(f"Could not record BIDS export in provenance: {exc}")
 
     return bids_path_out
 
