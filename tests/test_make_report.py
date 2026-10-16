@@ -74,3 +74,14 @@ def test_make_report_escapes_pre_hook_source(rng):
 def test_make_report_runs(rng, event_id):
     """Build a report with and without an event map."""
     assert isinstance(_report(_raw_with_events(rng), event_id=event_id), mne.Report)
+
+
+def test_joint_plot_file_names_are_portable(tmp_path):
+    """Joint-plot PNGs get BIDS-style, Windows-safe names."""
+    from bemobil_mne.preproc.make_report import _derivative_base, _safe_label
+
+    assert _safe_label("trialStart;condition:A/stimulus:x") == (
+        "trialStart-condition-A-stimulus-x"
+    )
+    fname_out = tmp_path / "sub-01_task-walk_eeg.fif.gz"
+    assert _derivative_base(fname_out) == "sub-01_task-walk"

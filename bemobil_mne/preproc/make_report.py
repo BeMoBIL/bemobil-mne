@@ -10,6 +10,7 @@ import html as _html
 import json
 import logging
 import os
+import re
 import tempfile
 import warnings
 from pathlib import Path
@@ -426,6 +427,22 @@ def _glue_imgs(paths: list, out_path: str | Path) -> bool:
     return True
 
 
+def _safe_label(label: str) -> str:
+    """Return *label* reduced to characters that are valid in file names.
+
+    Condition names such as ``"trialStart;condition:A"`` contain characters
+    (``:``, ``;``, ``/``) that are invalid on Windows or in BIDS labels.
+    """
+    return re.sub(r"[^A-Za-z0-9]+", "-", str(label)).strip("-") or "condition"
+
+
+def _derivative_base(fname_out: Path) -> str:
+    """Return the BIDS base name used for the other derivatives of a run."""
+    from bemobil_mne.preproc.preprocessing import get_derivative_paths
+
+    return get_derivative_paths(fname_out)["report"].name[: -len("_report.html")]
+
+
 def _add_joint_plot(report, evokeds_dict_ave: dict, fname_out: Path | None) -> None:
     """Save butterfly + GFP per condition as PNGs, combine, and add to *report*.
 
@@ -443,10 +460,10 @@ def _add_joint_plot(report, evokeds_dict_ave: dict, fname_out: Path | None) -> N
             except Exception as exc:
                 LOGGER.warning(f"Skipping joint plot for '{condition}': {exc}")
                 continue
-            safe_cond = condition.replace("/", "-")
+            safe_cond = _safe_label(condition)
             if fname_out is not None:
                 savepath = fname_out.with_name(
-                    f"{fname_out.stem}_joint-{safe_cond}.png"
+                    f"{_derivative_base(fname_out)}_joint-{safe_cond}.png"
                 )
             else:
                 savepath = Path(tmpdir) / f"joint-{safe_cond}.png"
@@ -462,7 +479,7 @@ def _add_joint_plot(report, evokeds_dict_ave: dict, fname_out: Path | None) -> N
         else:
             if fname_out is not None:
                 combined_path = fname_out.with_name(
-                    f"{fname_out.stem}_joint-COMBINED.png"
+                    f"{_derivative_base(fname_out)}_joint-COMBINED.png"
                 )
             else:
                 combined_path = Path(tmpdir) / "joint-COMBINED.png"
