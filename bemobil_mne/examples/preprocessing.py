@@ -8,10 +8,11 @@ import time
 from pathlib import Path
 
 import mne
+import mne_bids
 from mne.datasets import eegbci
 
 import bemobil_mne
-from bemobil_mne.preproc import EEGPreprocessor
+from bemobil_mne.preproc import EEGPreprocessor, get_derivative_paths
 from bemobil_mne.preproc.utils import get_descriptor
 
 # %%
@@ -37,11 +38,19 @@ event_id = {"T0": 1, "T1": 2, "T2": 3}
 # %%
 # Some further settings
 
+# save_path acts as a BIDS root. Derivatives go to derivatives/bemobil-mne/,
+# and the untouched input is written to the BIDS raw folder sub-001/eeg/.
 save_path = (
     Path(bemobil_mne.__file__).parent.parent / "reports" / "preprocess_plot_example"
 )
-save_path.mkdir(exist_ok=True, parents=True)
-fname_out = save_path / "testfile"
+fname_out = (
+    save_path
+    / "derivatives"
+    / "bemobil-mne"
+    / "sub-001"
+    / "eeg"
+    / "sub-001_task-imagery_run-06_eeg.fif"
+)
 seed = 869330571  # good practice: pick a random seed via secrets.randbits(31)
 
 # %%
@@ -52,7 +61,7 @@ seed = 869330571  # good practice: pick a random seed via secrets.randbits(31)
 #
 # `run_raw` returns a 3-tuple: (raw_clean, report, metadata).
 # `report` is an `mne.Report` (populated when make_report=True, else None).
-# `metadata` is a dict with keys: raw_minimal, raw_pre_ica, ica, ic_labels,
+# `metadata` is a dict with keys: raw_source, raw_pre_ica, ica, ic_labels,
 # dipoles, residuals, trans, bad_ch_dict.
 #
 # Set fit_dipoles=True to also get dipole fits and trans.
@@ -76,7 +85,7 @@ raw_clean, report, metadata = preprocessor.run_raw(
     fname_out=fname_out,
     overwrite=True,
 )
-raw_minimal = metadata["raw_minimal"]
+raw_source = metadata["raw_source"]
 raw_pre_ica = metadata["raw_pre_ica"]
 ica = metadata["ica"]
 ic_labels = metadata["ic_labels"]
@@ -116,7 +125,7 @@ if do_dipoles:
         trans=None,  # use fsaverage template
         rng_seed=seed,
     ).run_raw(raw, fname_out=fname_out, overwrite=True)
-    raw_minimal = metadata["raw_minimal"]
+    raw_source = metadata["raw_source"]
     raw_pre_ica = metadata["raw_pre_ica"]
     ica = metadata["ica"]
     ic_labels = metadata["ic_labels"]
@@ -140,7 +149,7 @@ raw_clean, report, metadata = EEGPreprocessor(
     # asr=False is the default - ASR is skipped
     rng_seed=seed,
 ).run_raw(raw, fname_out=None)
-raw_minimal = metadata["raw_minimal"]
+raw_source = metadata["raw_source"]
 raw_pre_ica = metadata["raw_pre_ica"]
 ica = metadata["ica"]
 ic_labels = metadata["ic_labels"]
@@ -157,34 +166,49 @@ print(f"Processing took {t_stop - t_start:.2f} seconds.")
 # Above, we assigned outputs of `run_raw` to different variables.
 # If you ran the pipeline before and only have the saved files, read them back:
 
-# Read back minimally processed data
-raw_minimal = mne.io.read_raw(f"{fname_out}_minimal.fif.gz", verbose="error")
+# get_derivative_paths gives the BIDS file names of all derivatives.
+paths = get_derivative_paths(fname_out)
+
+# Read back the source data (input exactly as passed to run_raw, nothing done)
+# from the BIDS raw folder
+raw_source = mne_bids.read_raw_bids(
+    mne_bids.BIDSPath(
+        root=save_path,
+        subject="001",
+        task="imagery",
+        run="06",
+        datatype="eeg",
+        suffix="eeg",
+        extension=".vhdr",
+    ),
+    verbose=False,
+)
 
 # Read back ICA cleaned data
-raw_clean = mne.io.read_raw(f"{fname_out}_clean.fif.gz", verbose="error")
+raw_clean = mne.io.read_raw(paths["clean"], verbose="error")
 
-# Read back the pre-ICA data (ASR cleaned if asr was enabled)
-raw_pre_ica = mne.io.read_raw(f"{fname_out}_pre-ICA.fif.gz", verbose="error")
+# Read back the pre-ICA data (everything but ICA; ASR cleaned if asr was enabled)
+raw_pre_ica = mne.io.read_raw(paths["pre_ica"], verbose="error")
 
 # Read back ICA solution
-ica = mne.preprocessing.read_ica(f"{fname_out}_ica.fif.gz", verbose="error")
+ica = mne.preprocessing.read_ica(paths["ica"], verbose="error")
 
 # Read back IC labels
-with open(f"{fname_out}_iclabels.json") as fin:
+with open(paths["iclabels"]) as fin:
     ic_labels = json.load(fin)
 
 # Read back bad channels (these have been interpolated in raw_clean)
-with open(f"{fname_out}_bad_channels.json") as fin:
+with open(paths["bad_channels"]) as fin:
     bad_ch_dict = json.load(fin)
 
 # If dipoles were saved, read them back like this:
-#   dipdir = Path(f"{fname_out}_dipoles")
+#   dipdir = paths["dipoles"]
 #   dipoles = [mne.read_dipole(f) for f in sorted(dipdir.glob("ic-*-dip.bdip"))]
 #   residuals = [
 #       mne.read_evokeds(f, verbose="error")[0]
 #       for f in sorted(dipdir.glob("ic-*-residual.fif.gz"))
 #   ]
-#   trans = mne.transforms.read_trans(f"{fname_out}_trans.fif", verbose="error")
+#   trans = mne.transforms.read_trans(paths["trans"], verbose="error")
 
 # %%
 # Manually change which ICs are excluded
