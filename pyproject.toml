@@ -94,7 +94,7 @@ source = "vcs"
 [tool.pytest.ini_options]
 addopts = """--cov=bemobil_mne --cov-report=html --cov-config=pyproject.toml
     --durations=20 -ra --junit-xml=junit-results.xml --tb=short
-    --ignore=doc --ignore=examples --ignore=mne_bids/tests/data -n auto"""
+    --ignore=doc -n auto"""
 filterwarnings = [
   "ignore::ImportWarning",
   "ignore::DeprecationWarning:mne",

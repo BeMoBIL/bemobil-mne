@@ -3,6 +3,7 @@
 # %% Imports
 
 import subprocess
+import sys
 
 import mne
 import numpy as np
@@ -153,7 +154,7 @@ def pytest_collection_modifyitems(config, items):
 def pytest_sessionfinish(session, exitstatus):
     """Print a brief coverage summary after the test run."""
     result = subprocess.run(
-        ["python", "-m", "coverage", "report", "--skip-empty"],
+        [sys.executable, "-m", "coverage", "report", "--skip-empty"],
         capture_output=True,
         text=True,
     )
