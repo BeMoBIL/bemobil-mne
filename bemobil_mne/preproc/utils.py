@@ -472,16 +472,16 @@ def auto_coreg_fsaverage(info, subjects_dir, fit_icp_kwargs=None):
     coreg.fit_fiducials(verbose=True)
 
     if fit_icp_kwargs is None:
-        fit_icp_kwargs = dict(
-            n_iterations=40,
-            lpa_weight=1.0,
-            nasion_weight=1.0,
-            rpa_weight=1.0,
-            hsp_weight=0,
-            eeg_weight=5.0,
-            hpi_weight=0,
-            verbose=True,
-        )
+        fit_icp_kwargs = {
+            "n_iterations": 40,
+            "lpa_weight": 1.0,
+            "nasion_weight": 1.0,
+            "rpa_weight": 1.0,
+            "hsp_weight": 0,
+            "eeg_weight": 5.0,
+            "hpi_weight": 0,
+            "verbose": True,
+        }
     coreg.fit_icp(**fit_icp_kwargs)
     return coreg.trans
 
@@ -526,6 +526,7 @@ def compute_ica(
     include_labels=None,
     ica_method="jamica",
     jamica_kwargs=None,
+    reject_by_annotation=True,
 ):
     """Fit ICA on a filtered copy of *raw* and label components with ICLabel.
 
@@ -617,7 +618,7 @@ def compute_ica(
         raw_ica.set_eeg_reference(ref_channels="average", projection=True)
 
     epochs = mne.make_fixed_length_epochs(
-        raw_ica, duration=1.0, preload=True, reject_by_annotation=True
+        raw_ica, duration=1.0, preload=True, reject_by_annotation=reject_by_annotation
     )
     # Apply the average-reference projection so that ICLabel sees a properly
     # CAR-referenced dataset (otherwise it emits a warning and may classify

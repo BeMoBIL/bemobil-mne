@@ -52,7 +52,7 @@ seed = 869330571  # good practice: pick a random seed via secrets.randbits(31)
 #
 # `run_raw` returns a 3-tuple: (raw_clean, report, metadata).
 # `report` is an `mne.Report` (populated when make_report=True, else None).
-# `metadata` is a dict with keys: raw_minimal, raw_asr, raw_subset, ica,
+# `metadata` is a dict with keys: raw_minimal, raw_pre_ica, raw_subset, ica,
 # ic_labels, dipoles, residuals, trans, bad_ch_dict.
 #
 # Set fit_dipoles=True to also get dipole fits and trans.
@@ -77,7 +77,7 @@ raw_clean, report, metadata = preprocessor.run_raw(
     overwrite=True,
 )
 raw_minimal = metadata["raw_minimal"]
-raw_asr = metadata["raw_asr"]
+raw_pre_ica = metadata["raw_pre_ica"]
 raw_subset = metadata["raw_subset"]
 ica = metadata["ica"]
 ic_labels = metadata["ic_labels"]
@@ -118,7 +118,7 @@ if do_dipoles:
         rng_seed=seed,
     ).run_raw(raw, fname_out=fname_out, overwrite=True)
     raw_minimal = metadata["raw_minimal"]
-    raw_asr = metadata["raw_asr"]
+    raw_pre_ica = metadata["raw_pre_ica"]
     raw_subset = metadata["raw_subset"]
     ica = metadata["ica"]
     ic_labels = metadata["ic_labels"]
@@ -143,7 +143,7 @@ raw_clean, report, metadata = EEGPreprocessor(
     rng_seed=seed,
 ).run_raw(raw, fname_out=None)
 raw_minimal = metadata["raw_minimal"]
-raw_asr = metadata["raw_asr"]
+raw_pre_ica = metadata["raw_pre_ica"]
 raw_subset = metadata["raw_subset"]
 ica = metadata["ica"]
 ic_labels = metadata["ic_labels"]
@@ -166,8 +166,8 @@ raw_minimal = mne.io.read_raw(f"{fname_out}_minimal.fif.gz", verbose="error")
 # Read back ICA cleaned data
 raw_clean = mne.io.read_raw(f"{fname_out}_clean.fif.gz", verbose="error")
 
-# Read back ASR cleaned data
-raw_asr = mne.io.read_raw(f"{fname_out}_asr.fif.gz", verbose="error")
+# Read back the pre-ICA data (ASR cleaned if asr was enabled)
+raw_pre_ica = mne.io.read_raw(f"{fname_out}_pre-ICA.fif.gz", verbose="error")
 
 # Read back ICA solution
 ica = mne.preprocessing.read_ica(f"{fname_out}_ica.fif.gz", verbose="error")
@@ -188,6 +188,23 @@ with open(f"{fname_out}_bad_channels.json") as fin:
 #       for f in sorted(dipdir.glob("ic-*-residual.fif.gz"))
 #   ]
 #   trans = mne.transforms.read_trans(f"{fname_out}_trans.fif", verbose="error")
+
+# %%
+# Manually change which ICs are excluded
+#
+# If the report shows ICs that ICLabel missed (or removed wrongly), there is
+# no need to re-run the whole pipeline. `reapply_ica` loads the saved pre-ICA
+# data and ICA, edits `ica.exclude` and redoes only ICA application,
+# re-referencing and interpolation. It overwrites the clean data, the ICA
+# file and the report.
+#
+#   raw_clean, report, metadata = preprocessor.reapply_ica(
+#       fname_out,
+#       add=[3, 17],  # exclude these on top of the automatic selection
+#       remove=[5],  # keep this one after all
+#   )
+#
+# Pass `exclude=[...]` instead to replace the selection entirely.
 
 # %%
 # Plot a dipole corresponding to an IC (only when fit_dipoles=True was used)

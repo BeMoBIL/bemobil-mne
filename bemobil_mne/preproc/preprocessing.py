@@ -37,13 +37,26 @@ NumpyEncoder = _NumpyEncoder
 
 LOGGER = logging.getLogger(__name__)
 
+# Suffix of the saved pre-ICA recording (input to ``ica.apply``).
+PRE_ICA_SUFFIX = "_pre-ICA.fif.gz"
+
 # %% Functions
+
+
+def _output_stem(fname_out):
+    """Return *fname_out* without its ``.fif`` / ``.fif.gz`` extension."""
+    fname_out = Path(fname_out)
+    name = fname_out.name
+    for ext in (".fif.gz", ".fif"):
+        if name.endswith(ext):
+            return fname_out.with_name(name[: -len(ext)])
+    return fname_out
 
 
 def get_bad_chs(
     raw,
     pyprep_kwargs=None,
-    notch_lines=np.arange(50, 151, 50),
+    notch_lines=None,
     notch_width=1.0,
     line_noise_crit=None,
     deviation_threshold=3.5,
@@ -112,6 +125,9 @@ def get_bad_chs(
     """
     raw = raw.copy()
 
+    if notch_lines is None:
+        notch_lines = np.arange(50, 151, 50)
+
     if isinstance(notch_lines, str):
         if notch_lines == "europe":
             notch_lines = np.arange(50, 151, 50)
@@ -178,7 +194,7 @@ def get_bad_chs(
         use_metrics=["correlation", "variance"],
     )
     bads_dict_faster["bad_all"] = list(
-        set(v for val in bads_dict_faster.values() if len(val) > 0 for v in val)
+        {v for val in bads_dict_faster.values() if len(val) > 0 for v in val}
     )
 
     bad_chs = set()
@@ -361,13 +377,17 @@ class EEGPreprocessor:
     asr : bool | dict
         Controls Artifact Subspace Reconstruction (ASR).
 
-        - ``False`` (default): skip ASR; ``raw_asr`` is a copy of
+        - ``False`` (default): skip ASR; ``raw_pre_ica`` is a copy of
           ``raw_minimal``.
         - ``True``: run ASR with the default parameters of
           :func:`~bemobil_mne.preproc.utils.compute_asr`.
         - ``dict``: run ASR and pass the dict as keyword arguments to
           :func:`~bemobil_mne.preproc.utils.compute_asr` (e.g.
           ``{"cutoff": 10, "estimator": "lwf"}``).
+
+        Either way, ``raw_pre_ica`` is the data ICA is applied to, and it is
+        saved as ``{stem}_pre-ICA.fif.gz`` so that ICA can be re-applied with
+        a different set of excluded components via :meth:`reapply_ica`.
     filter_bands_ica : tuple of float
         ``(l_freq, h_freq)`` for the ICA-specific bandpass filter.
     downsample_ica : float | None
@@ -385,7 +405,7 @@ class EEGPreprocessor:
         ``{"max_iter": 2000}``.  ``None`` uses jamica's defaults.  Ignored
         when a non-jamica method is used or ``fit_ica=False``.
     fit_ica : bool
-        If ``False``, skip ICA entirely (``raw_clean`` equals ``raw_asr``).
+        If ``False``, skip ICA entirely (``raw_clean`` equals ``raw_pre_ica``).
     thresh : float
         ICLabel decision threshold.  Set to ``-1`` (default, matching
         BeMoBIL) to use **popularity-vote** mode: each IC is assigned to
@@ -395,12 +415,12 @@ class EEGPreprocessor:
         an IC is excluded only when its artifact-class probability meets or
         exceeds this value.
     exclude_labels : list of str | None
-        ICLabel categories to exclude.  Mutually exclusive with
+        ICLabel categories to exclude. Mutually exclusive with
         *include_labels*.
     include_labels : set of str | None
         ICLabel categories to keep; all others are excluded.  Defaults to
         all classes except ``"eye blink"`` (matching BeMoBIL's
-        ``iclabel_classes = [1 2 4 5 6 7]``).  Mutually exclusive with
+        ``iclabel_classes = [1 2 4 5 6 7]``). Mutually exclusive with
         *exclude_labels*.
     fit_dipoles : bool
         If ``True``, fit a dipole to each ICA component topography using the
@@ -454,6 +474,7 @@ class EEGPreprocessor:
         ica_method: str = "jamica",
         jamica_kwargs: dict | None = None,
         fit_ica: bool = True,
+        reject_by_annotation: bool = True,
         thresh: float = -1,
         exclude_labels: list | None = None,
         include_labels: set | None = frozenset(
@@ -509,6 +530,7 @@ class EEGPreprocessor:
         self.downsample_ica = downsample_ica
         self.ica_method = ica_method
         self.jamica_kwargs = jamica_kwargs
+        self.reject_by_annotation = reject_by_annotation
         self.fit_ica = fit_ica
         self.thresh = thresh
         self.exclude_labels = exclude_labels
@@ -599,7 +621,7 @@ class EEGPreprocessor:
             Quality report (populated when ``make_report=True``, else ``None``).
         metadata : dict
             All other pipeline outputs keyed by name:
-            ``raw_minimal``, ``raw_asr``, ``raw_subset``, ``ica``,
+            ``raw_minimal``, ``raw_pre_ica``, ``raw_subset``, ``ica``,
             ``ic_labels``, ``dipoles``, ``residuals``, ``trans``,
             ``bad_ch_dict``.
         """
@@ -607,14 +629,18 @@ class EEGPreprocessor:
         timer = StepTimer()
 
         # --- Skip-if-exists caching ---
-        if self.skip_if_exists and not overwrite and fname_out is not None:
-            if Path(fname_out).exists():
-                import logging as _log
+        if (
+            self.skip_if_exists
+            and not overwrite
+            and fname_out is not None
+            and Path(fname_out).exists()
+        ):
+            import logging as _log
 
-                _log.getLogger(__name__).info(
-                    f"skip_if_exists=True: loading cached outputs from {fname_out}"
-                )
-                return self._load_cached_outputs(fname_out)
+            _log.getLogger(__name__).info(
+                f"skip_if_exists=True: loading cached outputs from {fname_out}"
+            )
+            return self._load_cached_outputs(fname_out)
 
         # --- Provenance ---
         filenames = [str(p) for p in getattr(raw, "filenames", []) if p]
@@ -753,11 +779,11 @@ class EEGPreprocessor:
         # --- ASR ---
         t0 = time.perf_counter()
         if self.asr is False:
-            raw_asr = raw_minimal.copy()
+            raw_pre_ica = raw_minimal.copy()
         else:
             _asr_kwargs = self.asr if isinstance(self.asr, dict) else {}
-            raw_asr = compute_asr(raw_minimal, **_asr_kwargs)
-            append_desc(raw_asr, name="asr", **_asr_kwargs)
+            raw_pre_ica = compute_asr(raw_minimal, **_asr_kwargs)
+            append_desc(raw_pre_ica, name="asr", **_asr_kwargs)
         timer.log_step("asr", time.perf_counter() - t0)
 
         # --- ICA ---
@@ -765,12 +791,12 @@ class EEGPreprocessor:
         trans_out = None
         # Snapshot annotations present at ICA time (after break annotation +
         # bad-channel detection, before ICA filtering/subsampling removes them)
-        ica_annots = raw_asr.annotations.copy()
+        ica_annots = raw_pre_ica.annotations.copy()
         t0 = time.perf_counter()
 
         if self.fit_ica:
             ica, ic_labels = compute_ica(
-                raw_asr,
+                raw_pre_ica,
                 filter_bands_ica=self.filter_bands_ica,
                 downsample_ica=self.downsample_ica,
                 thresh=self.thresh,
@@ -779,9 +805,10 @@ class EEGPreprocessor:
                 include_labels=self.include_labels,
                 ica_method=self.ica_method,
                 jamica_kwargs=self.jamica_kwargs,
+                reject_by_annotation=self.reject_by_annotation,
             )
             append_desc(
-                raw_asr,
+                raw_pre_ica,
                 name="ica",
                 method=self.ica_method,
                 n_excluded=len(ica.exclude),
@@ -798,7 +825,7 @@ class EEGPreprocessor:
                 n_components=None,
                 random_state=self.rng_seed,
                 method="picard",
-                fit_params=dict(ortho=False, extended=True),
+                fit_params={"ortho": False, "extended": True},
             )  # stub - never fitted
             ic_labels = {}
 
@@ -807,17 +834,17 @@ class EEGPreprocessor:
         # --- Dipole fitting ---
         if self.fit_dipoles:
             t0 = time.perf_counter()
-            trans_out = _handle_trans(self.trans, raw_asr.info)
+            trans_out = _handle_trans(self.trans, raw_pre_ica.info)
             dipoles, residuals = fit_dipoles_on_ica(
                 ica,
-                raw_asr.info,
+                raw_pre_ica.info,
                 trans_out,
                 rv_thresh=self.rv_thresh,
                 remove_outside_head=self.remove_outside_head,
             )
             n_valid = sum(d is not None for d in dipoles)
             append_desc(
-                raw_asr,
+                raw_pre_ica,
                 name="dipole_fitting",
                 n_dipoles=len(dipoles),
                 n_dipolar=n_valid,
@@ -829,14 +856,14 @@ class EEGPreprocessor:
         # --- Apply ICA, avg-ref, interpolate ---
         t0 = time.perf_counter()
         if self.fit_ica:
-            raw_clean = ica.apply(raw_asr.copy())
+            raw_clean = ica.apply(raw_pre_ica.copy())
         else:
-            raw_clean = raw_asr.copy()
+            raw_clean = raw_pre_ica.copy()
         # Bake in the average EEG reference here, at the very end of the
         # pipeline. Up to this point the reference has only ever existed as
         # an unapplied SSP projection (added with projection=True back in
         # the "minimal" processing stage and inherited via .copy()/ICA
-        # through raw_asr -> raw_clean and raw_minimal) -- it is only
+        # through raw_pre_ica -> raw_clean and raw_minimal) -- it is only
         # actually applied to the data now, once, via apply_proj(). The
         # `set_eeg_reference` calls are only a defensive fallback in case a
         # given raw somehow doesn't already carry the projection (e.g. if
@@ -901,7 +928,7 @@ class EEGPreprocessor:
                 fname_out,
                 raw_minimal=raw_minimal,
                 raw_clean=raw_clean,
-                raw_asr=raw_asr,
+                raw_pre_ica=raw_pre_ica,
                 raw_subset=raw_subset,
                 ica=ica,
                 ic_labels=ic_labels,
@@ -922,7 +949,7 @@ class EEGPreprocessor:
 
         metadata = {
             "raw_minimal": raw_minimal,
-            "raw_asr": raw_asr,
+            "raw_pre_ica": raw_pre_ica,
             "raw_subset": raw_subset,
             "ica": ica,
             "ic_labels": ic_labels,
@@ -942,7 +969,7 @@ class EEGPreprocessor:
         *,
         raw_minimal,
         raw_clean,
-        raw_asr,
+        raw_pre_ica,
         raw_subset,
         ica,
         ic_labels,
@@ -955,10 +982,7 @@ class EEGPreprocessor:
     ):
         """Save all pipeline derivatives to disk."""
         fname_out = Path(fname_out)
-        if fname_out.suffix == ".gz" and fname_out.stem.endswith(".fif"):
-            stem = fname_out.with_name(fname_out.stem[:-4])  # strip .fif.gz
-        else:
-            stem = fname_out.with_suffix("")  # strip .fif
+        stem = _output_stem(fname_out)
         fname_out.parent.mkdir(parents=True, exist_ok=True)
 
         # raw_clean is saved to fname_out directly (primary output / skip sentinel)
@@ -969,9 +993,12 @@ class EEGPreprocessor:
             overwrite=overwrite,
             verbose="error",
         )
-        if self.asr is not False:
-            raw_asr.save(
-                stem.with_name(stem.name + "_asr.fif.gz"),
+        # Pre-ICA data (ASR-cleaned if ASR ran, avg-ref still an unapplied
+        # projection). Needed by reapply_ica(), so it is saved whenever ICA
+        # was fitted, not only when ASR ran.
+        if self.asr is not False or self.fit_ica:
+            raw_pre_ica.save(
+                stem.with_name(stem.name + PRE_ICA_SUFFIX),
                 overwrite=overwrite,
                 verbose="error",
             )
@@ -1022,11 +1049,12 @@ class EEGPreprocessor:
     def _load_cached_outputs(self, fname_out):
         """Load previously saved pipeline outputs and return the run_raw 3-tuple.
 
-        Used by the ``skip_if_exists`` fast-path in :meth:`run_raw`.
-        Missing auxiliary files yield ``None`` / empty collections.
+        Used by the ``skip_if_exists`` fast-path in :meth:`run_raw` and by
+        :meth:`reapply_ica`. Missing auxiliary files yield ``None`` / empty
+        collections. Recordings are not preloaded.
         """
         fname_out = Path(fname_out)
-        stem = fname_out.with_suffix("")
+        stem = _output_stem(fname_out)
 
         raw_clean = mne.io.read_raw(fname_out, verbose="error")
 
@@ -1037,12 +1065,11 @@ class EEGPreprocessor:
             else raw_clean
         )
 
-        _asr_path = stem.with_name(stem.name + "_asr.fif.gz")
-        raw_asr = (
-            mne.io.read_raw(_asr_path, verbose="error")
-            if _asr_path.exists()
-            else raw_minimal
-        )
+        _pre_ica_path = stem.with_name(stem.name + PRE_ICA_SUFFIX)
+        if _pre_ica_path.exists():
+            raw_pre_ica = mne.io.read_raw(_pre_ica_path, verbose="error")
+        else:
+            raw_pre_ica = raw_minimal
 
         _subset_path = stem.with_name(stem.name + "_minimal-subset.fif.gz")
         raw_subset = (
@@ -1070,14 +1097,34 @@ class EEGPreprocessor:
             with open(_bad_path) as f:
                 bad_ch_dict = json.load(f)
 
+        # Dipoles / residuals are saved one file per IC, skipping ICs whose
+        # fit was rejected (None). Rebuild lists indexed by IC number so that
+        # dipoles[i] belongs to IC i, with None in the gaps.
         _dipdir = stem.parent / f"{stem.name}_dipoles"
         dipoles: list = []
         residuals: list = []
         if _dipdir.exists():
-            for dip_path in sorted(_dipdir.glob("ic-*-dip.bdip")):
-                dipoles.append(mne.read_dipole(dip_path))
-            for res_path in sorted(_dipdir.glob("ic-*-residual.fif.gz")):
-                residuals.append(mne.read_evokeds(res_path, verbose="error")[0])
+            dip_files = {
+                int(p.name.split("-")[1]): p for p in _dipdir.glob("ic-*-dip.bdip")
+            }
+            res_files = {
+                int(p.name.split("-")[1]): p
+                for p in _dipdir.glob("ic-*-residual.fif.gz")
+            }
+            n_ics = getattr(ica, "n_components_", None) or 0
+            n = max([n_ics, *(i + 1 for i in dip_files), *(i + 1 for i in res_files)])
+            dipoles = [
+                mne.read_dipole(dip_files[i], verbose="error")
+                if i in dip_files
+                else None
+                for i in range(n)
+            ]
+            residuals = [
+                mne.read_evokeds(res_files[i], verbose="error")[0]
+                if i in res_files
+                else None
+                for i in range(n)
+            ]
 
         _trans_path = stem.with_name(stem.name + "_trans.fif")
         trans = (
@@ -1088,7 +1135,7 @@ class EEGPreprocessor:
 
         metadata = {
             "raw_minimal": raw_minimal,
-            "raw_asr": raw_asr,
+            "raw_pre_ica": raw_pre_ica,
             "raw_subset": raw_subset,
             "ica": ica,
             "ic_labels": ic_labels,
@@ -1098,3 +1145,141 @@ class EEGPreprocessor:
             "bad_ch_dict": bad_ch_dict,
         }
         return (raw_clean, None, metadata)
+
+    # ------------------------------------------------------------------
+    # Post-hoc ICA editing
+
+    def reapply_ica(
+        self,
+        fname_out: str | Path,
+        *,
+        exclude: list[int] | None = None,
+        add: list[int] | tuple = (),
+        remove: list[int] | tuple = (),
+        save: bool = True,
+        make_report: bool | None = None,
+    ) -> tuple:
+        """Re-apply a saved ICA with a manually edited set of excluded ICs.
+
+        Loads the outputs of a previous :meth:`run_raw` call from disk,
+        changes ``ica.exclude`` and repeats only the final pipeline stage
+        (ICA application, average reference, bad-channel interpolation).
+        Bad-channel detection, ASR, ICA fitting and dipole fitting are not
+        re-run.
+
+        Parameters
+        ----------
+        fname_out : str | Path
+            The *fname_out* used for the original run.
+        exclude : list of int | None
+            Full list of ICs to exclude, replacing the automatic selection.
+            If ``None``, start from the saved ``ica.exclude`` and apply
+            *add* / *remove*.
+        add : list of int
+            ICs to exclude in addition to the saved ones. Ignored when
+            *exclude* is given.
+        remove : list of int
+            ICs to keep even though they were excluded before. Ignored when
+            *exclude* is given.
+        save : bool
+            If ``True`` (default), overwrite ``fname_out`` (``raw_clean``),
+            the ``_ica.fif.gz`` file and, if made, the report.
+        make_report : bool | None
+            Regenerate the HTML report. ``None`` (default) uses
+            :attr:`make_report`.
+
+        Returns
+        -------
+        Same 3-tuple as :meth:`run_raw`: ``(raw_clean, report, metadata)``.
+        """
+        fname_out = Path(fname_out)
+        stem = _output_stem(fname_out)
+        if not stem.with_name(stem.name + PRE_ICA_SUFFIX).exists():
+            raise FileNotFoundError(
+                f"No pre-ICA recording ({stem.name}{PRE_ICA_SUFFIX}) found next to "
+                f"{fname_out}. Re-run the pipeline with fit_ica=True to create it."
+            )
+
+        _, _, metadata = self._load_cached_outputs(fname_out)
+        ica = metadata["ica"]
+        if ica.current_fit == "unfitted":
+            raise RuntimeError(f"No fitted ICA found for {fname_out}.")
+
+        n_ics = ica.n_components_
+        auto_exclude = sorted(int(i) for i in ica.exclude)
+        if exclude is not None:
+            new_exclude = set(exclude)
+        else:
+            new_exclude = (set(auto_exclude) | set(add)) - set(remove)
+        bad_idx = [i for i in new_exclude if not 0 <= i < n_ics]
+        if bad_idx:
+            raise ValueError(f"IC indices out of range 0..{n_ics - 1}: {bad_idx}")
+        ica.exclude = sorted(int(i) for i in new_exclude)
+
+        raw_pre_ica = metadata["raw_pre_ica"].load_data()
+        raw_clean = ica.apply(raw_pre_ica.copy())
+
+        # Same final stage as run_raw: bake in the avg-ref projection,
+        # then interpolate bad (non-EOG) channels.
+        if not any(
+            p["desc"] == "Average EEG reference" for p in raw_clean.info["projs"]
+        ):
+            raw_clean.set_eeg_reference(ref_channels="average", projection=True)
+        raw_clean.apply_proj()
+        append_desc(raw_clean, name="avg_ref")
+        eog_chs = [
+            ch
+            for ch, d in zip(raw_clean.ch_names, raw_clean.info["chs"])
+            if d["kind"] == mne.io.constants.FIFF.FIFFV_EOG_CH
+        ]
+        bads_to_interp = [b for b in raw_clean.info["bads"] if b not in eog_chs]
+        raw_clean.info["bads"] = bads_to_interp
+        raw_clean.interpolate_bads(reset_bads=True, method="spline")
+        append_desc(
+            raw_clean,
+            name="interpolate_bads",
+            method="spline",
+            interpolated=bads_to_interp,
+            eog_excluded=eog_chs,
+        )
+        append_desc(
+            raw_clean,
+            name="manual_ic_rejection",
+            auto_excluded=auto_exclude,
+            excluded=ica.exclude,
+        )
+
+        report = None
+        if self.make_report if make_report is None else make_report:
+            from bemobil_mne.preproc.make_report import make_report as _make_report
+
+            report = _make_report(
+                raw_minimal=metadata["raw_minimal"].load_data(),
+                raw_clean=raw_clean,
+                ica=ica,
+                ic_labels=metadata["ic_labels"],
+                dipoles=metadata["dipoles"],
+                residuals=metadata["residuals"],
+                trans=metadata["trans"],
+                bad_ch_dict=metadata["bad_ch_dict"],
+                fname_out=fname_out,
+                event_id=self.event_id,
+                thresh=self.thresh,
+                ica_annots=raw_pre_ica.annotations,
+            )
+
+        if save:
+            raw_clean.save(fname_out, overwrite=True, verbose="error")
+            ica.save(
+                stem.with_name(stem.name + "_ica.fif.gz"),
+                overwrite=True,
+                verbose="error",
+            )
+            if report is not None:
+                report.save(
+                    str(stem.with_name(stem.name + "_report.html")),
+                    overwrite=True,
+                    open_browser=False,
+                )
+
+        return (raw_clean, report, metadata)

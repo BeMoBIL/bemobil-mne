@@ -6,7 +6,12 @@ import mne
 import numpy as np
 import pytest
 
-from bemobil_mne.preproc.preprocessing import EEGPreprocessor, get_bad_chs
+from bemobil_mne.preproc.preprocessing import (
+    PRE_ICA_SUFFIX,
+    EEGPreprocessor,
+    _output_stem,
+    get_bad_chs,
+)
 
 # %% Helpers
 
@@ -143,6 +148,51 @@ def test_eegpreprocessor_skip_if_exists(tmp_path):
     mock_load.assert_called_once()
 
 
+@pytest.mark.parametrize(
+    "name", ["sub-01_clean.fif.gz", "sub-01_clean.fif", "sub-01_clean"]
+)
+def test_output_stem_strips_fif_extensions(tmp_path, name):
+    """Strip .fif and .fif.gz so save and load build the same file names."""
+    assert _output_stem(tmp_path / name) == tmp_path / "sub-01_clean"
+
+
+def test_load_cached_outputs_aligns_dipoles_by_ic_index(tmp_path):
+    """Place loaded dipoles at their IC index, with None for missing fits."""
+    raw = _eeg_raw(n_ch=8, duration=5.0)
+    fname_out = tmp_path / "sub-01_clean.fif.gz"
+    raw.save(fname_out, verbose="error")
+    dipdir = tmp_path / "sub-01_clean_dipoles"
+    dipdir.mkdir()
+    dip = mne.Dipole(
+        times=[0.0],
+        pos=[[0.0, 0.0, 0.05]],
+        amplitude=[1e-8],
+        ori=[[0.0, 0.0, 1.0]],
+        gof=[90.0],
+    )
+    for i in (0, 2):  # IC 1 had no valid dipole
+        dip.save(dipdir / f"ic-{i:02}-dip.bdip", verbose="error")
+
+    proc = EEGPreprocessor(loader=None)
+    _, _, metadata = proc._load_cached_outputs(fname_out)
+
+    dipoles = metadata["dipoles"]
+    assert len(dipoles) == 3
+    assert dipoles[0] is not None
+    assert dipoles[1] is None
+    assert dipoles[2] is not None
+
+
+def test_reapply_ica_requires_pre_ica_file(tmp_path):
+    """Raise a clear error when the pre-ICA recording was never saved."""
+    raw = _eeg_raw(n_ch=8, duration=5.0)
+    fname_out = tmp_path / "sub-01_clean.fif.gz"
+    raw.save(fname_out, verbose="error")
+    proc = EEGPreprocessor(loader=None)
+    with pytest.raises(FileNotFoundError, match="pre-ICA"):
+        proc.reapply_ica(fname_out, add=[0])
+
+
 # %% EEGPreprocessor - integration (slow)
 
 
@@ -165,6 +215,41 @@ def test_eegpreprocessor_full_run_no_dipoles(tmp_path, sample_raw):
     assert fname_out.exists()
     assert raw_out is not None
     assert raw_out.info["sfreq"] == pytest.approx(sample_raw.info["sfreq"], rel=0.1)
+
+
+@pytest.mark.slowtest
+def test_eegpreprocessor_reapply_ica(tmp_path, sample_raw):
+    """Save the pre-ICA file and re-apply ICA with a manual exclusion."""
+    proc = EEGPreprocessor(
+        loader=None,
+        filter_bands=(1.0, 40.0),
+        line_noise_freq=60.0,
+        line_noise_method="dss_line",
+        fit_ica=True,
+        ica_method="picard",
+        make_report=False,
+    )
+    fname_out = tmp_path / "sub-01_clean.fif.gz"
+    _, _, metadata = proc.run_raw(sample_raw.copy(), fname_out=fname_out)
+
+    assert (tmp_path / f"sub-01_clean{PRE_ICA_SUFFIX}").exists()
+
+    auto_exclude = list(metadata["ica"].exclude)
+    n_ics = metadata["ica"].n_components_
+    extra = next(i for i in range(n_ics) if i not in auto_exclude)
+
+    raw_clean, _, md = proc.reapply_ica(fname_out, add=[extra])
+
+    expected = sorted(set(auto_exclude) | {extra})
+    assert md["ica"].exclude == expected
+    reloaded = mne.preprocessing.read_ica(
+        tmp_path / "sub-01_clean_ica.fif.gz", verbose="error"
+    )
+    assert sorted(reloaded.exclude) == expected
+    assert raw_clean.info["bads"] == []
+
+    with pytest.raises(ValueError, match="out of range"):
+        proc.reapply_ica(fname_out, add=[n_ics + 5], save=False)
 
 
 @pytest.mark.slowtest
