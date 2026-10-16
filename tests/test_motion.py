@@ -259,3 +259,64 @@ def test_src_to_deriv_fallback():
     """Append suffix to unrecognised channel names."""
     result = _src_to_deriv("mystreamchannel", "_vel")
     assert result == "mystreamchannel_vel"
+
+
+# %% Regression tests
+
+
+def _rotating_quat_raw(sfreq=100.0, duration=10.0, turns=3, with_pos=False):
+    """Quaternion-only rigid body rotating steadily about z."""
+    t = np.arange(0, duration, 1 / sfreq)
+    yaw = np.linspace(0, turns * 2 * np.pi, len(t))
+    zeros = np.zeros_like(t)
+    data = [zeros, zeros, np.sin(yaw / 2), np.cos(yaw / 2)]
+    names = [f"rb_quat_{a}" for a in "xyzw"]
+    if with_pos:
+        data.append(zeros)
+        names.append("rb_pos_x")
+    info = mne.create_info(names, sfreq, "misc")
+    return mne.io.RawArray(np.vstack(data), info, verbose=False), turns * 2 * np.pi / (
+        t[-1] - t[0]
+    )
+
+
+def test_process_rigid_body_unwraps_euler():
+    """A steady rotation gives a steady velocity, without 2*pi jumps."""
+    raw, true_vel = _rotating_quat_raw()
+    out, _ = process_rigid_body(raw, lowpass_orient=None, lowpass_deriv=None)
+    vel = out.get_data(picks=["rb_eul_vel_z"])[0]
+    np.testing.assert_allclose(vel, true_vel, rtol=0.02)
+    yaw = out.get_data(picks=["rb_eul_z"])[0]
+    assert yaw[-1] > np.pi  # continuous, not wrapped to +-pi
+
+
+def test_process_rigid_body_unwrap_false_keeps_wrapped_angles():
+    """unwrap=False returns angles within +-pi."""
+    raw, _ = _rotating_quat_raw()
+    out, _ = process_rigid_body(raw, lowpass_orient=None, unwrap=False)
+    assert np.abs(out.get_data(picks=["rb_eul_z"])).max() <= np.pi + 1e-9
+
+
+def test_process_rigid_body_quaternion_only_recording():
+    """A recording holding only quaternion channels can be processed."""
+    raw, _ = _rotating_quat_raw()
+    out, info = process_rigid_body(raw)
+    assert info["rb"]["mode"] == "quat->euler"
+    assert not any("_quat_" in ch for ch in out.ch_names)
+    assert {"rb_eul_x", "rb_eul_y", "rb_eul_z"} <= set(out.ch_names)
+
+
+def test_process_rigid_body_sfreq_target():
+    """sfreq_target resamples before filtering and differentiation."""
+    raw, _ = _rotating_quat_raw(sfreq=200.0, with_pos=True)
+    out, _ = process_rigid_body(raw, sfreq_target=100.0)
+    assert out.info["sfreq"] == 100.0
+    assert out.n_times == raw.n_times // 2
+
+
+def test_process_rigid_body_incomplete_quaternion_raises():
+    """Missing quaternion components raise a clear error."""
+    raw, _ = _rotating_quat_raw()
+    raw.drop_channels(["rb_quat_w"])
+    with pytest.raises(ValueError, match="incomplete quaternion"):
+        process_rigid_body(raw)
