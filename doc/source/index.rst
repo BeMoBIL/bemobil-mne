@@ -58,7 +58,12 @@ Quick start
        line_noise_freq="europe",   # 50 Hz + harmonics up to Nyquist
        line_noise_method="adaptive",  # ZapLine-Plus before filtering
    )
-   raw_clean, report, metadata = preprocessor.run_raw(raw, fname_out="sub-01_clean.fif.gz")
+   raw_clean, report, metadata = preprocessor.run_raw(
+       raw,
+       fname_out="derivatives/bemobil-mne/sub-01/eeg/sub-01_task-walk_run-01_eeg.fif",
+   )
+   # writes derivatives/.../sub-01_task-walk_run-01_desc-clean_eeg.fif (+ ICA,
+   # report, ...) and the untouched input to sub-01/eeg/ (BIDS raw)
 
    # raw_clean : ICA-cleaned, average-referenced, bad channels interpolated
    # report    : mne.Report HTML summary (saved alongside output)

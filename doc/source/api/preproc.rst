@@ -21,10 +21,15 @@ the :class:`mne.io.Raw` object.
 
 .. currentmodule:: bemobil_mne.preproc
 
+Outputs are named after BIDS: :func:`get_derivative_paths` lists the
+derivative files written for a given ``fname_out``, and the untouched input is
+written to the raw part of the BIDS dataset.
+
 .. autosummary::
    :toctree: generated/
 
    EEGPreprocessor
+   get_derivative_paths
 
 ----
 

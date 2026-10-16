@@ -36,11 +36,6 @@ NumpyEncoder = _NumpyEncoder
 
 LOGGER = logging.getLogger(__name__)
 
-# Suffix of the saved source recording (input exactly as passed to run_raw).
-SOURCE_SUFFIX = "_source.fif.gz"
-# Suffix of the saved pre-ICA recording (input to ``ica.apply``).
-PRE_ICA_SUFFIX = "_pre-ICA.fif.gz"
-
 # %% Functions
 
 
@@ -52,6 +47,65 @@ def _output_stem(fname_out):
         if name.endswith(ext):
             return fname_out.with_name(name[: -len(ext)])
     return fname_out
+
+
+def get_derivative_paths(fname_out):
+    """Return the paths of all derivatives :class:`EEGPreprocessor` writes.
+
+    File names follow BIDS: the entities in the file name of *fname_out*
+    (``sub-``, ``ses-``, ``task-``, ``run-``, ...) are kept, its suffix
+    (e.g. ``_eeg``) and any ``desc-`` entity are dropped, and each output
+    gets a ``desc-`` label or its own suffix. The extension of *fname_out*
+    (``.fif`` or ``.fif.gz``, default ``.fif``) is used for the FIF files.
+    For ``<dir>/sub-01_task-walk_eeg.fif.gz``:
+
+    - ``"clean"``: ``sub-01_task-walk_desc-clean_eeg.fif.gz``
+    - ``"pre_ica"``: ``sub-01_task-walk_desc-preica_eeg.fif.gz``
+    - ``"ica"``: ``sub-01_task-walk_ica.fif.gz``
+    - ``"iclabels"``: ``sub-01_task-walk_iclabels.json``
+    - ``"bad_channels"``: ``sub-01_task-walk_badchannels.json``
+    - ``"dipoles"``: ``sub-01_task-walk_dipoles/`` (one file per IC)
+    - ``"trans"``: ``sub-01_task-walk_trans.fif``
+    - ``"report"``: ``sub-01_task-walk_report.html``
+
+    All paths are in the folder of *fname_out*. The untouched input is not
+    a derivative; it goes to the raw part of the BIDS dataset (see
+    ``save_bids_raw`` in :class:`EEGPreprocessor`).
+
+    Parameters
+    ----------
+    fname_out : str | Path
+        The *fname_out* passed to :meth:`EEGPreprocessor.run_raw`.
+
+    Returns
+    -------
+    paths : dict of str to Path
+        The paths, keyed as listed above.
+    """
+    fname_out = Path(fname_out)
+    name, ext = fname_out.name, ".fif"
+    for _ext in (".fif.gz", ".fif"):
+        if name.endswith(_ext):
+            name, ext = name[: -len(_ext)], _ext
+            break
+    parts = name.split("_")
+    if len(parts) > 1 and "-" not in parts[-1]:
+        parts = parts[:-1]  # drop the suffix, e.g. "eeg"
+    parts = [p for p in parts if not p.startswith("desc-")]
+    if not parts:
+        raise ValueError(f"Cannot build derivative names from {fname_out.name!r}.")
+    base = "_".join(parts)
+    folder = fname_out.parent
+    return {
+        "clean": folder / f"{base}_desc-clean_eeg{ext}",
+        "pre_ica": folder / f"{base}_desc-preica_eeg{ext}",
+        "ica": folder / f"{base}_ica{ext}",
+        "iclabels": folder / f"{base}_iclabels.json",
+        "bad_channels": folder / f"{base}_badchannels.json",
+        "dipoles": folder / f"{base}_dipoles",
+        "trans": folder / f"{base}_trans.fif",
+        "report": folder / f"{base}_report.html",
+    }
 
 
 def _bids_raw_target(fname_out, bids_root=None):
@@ -306,7 +360,9 @@ class EEGPreprocessor:
     Three recordings come out of the pipeline:
 
     - ``raw_source``: the input exactly as passed to :meth:`run_raw`
-      (nothing done). In BIDS this is considered 'raw' format.
+      (nothing done). In BIDS this is considered 'raw' format; it is
+      written to the raw part of the BIDS dataset (``save_bids_raw``), not
+      to the derivatives.
     - ``raw_pre_ica``: every step except ICA (renaming, pre-hook, line-noise
       removal, bad-channel detection, break annotation, bandpass, average
       reference projection, ASR). This is the data ICA is fitted on and
@@ -438,7 +494,7 @@ class EEGPreprocessor:
           ``{"cutoff": 10, "estimator": "lwf"}``).
 
         Either way, ``raw_pre_ica`` is the data ICA is applied to, and it is
-        saved as ``{stem}_pre-ICA.fif.gz`` so that ICA can be re-applied with
+        saved as ``*_desc-preica_eeg.fif`` so that ICA can be re-applied with
         a different set of excluded components via :meth:`reapply_ica`.
     filter_bands_ica : tuple of float
         ``(l_freq, h_freq)`` for the ICA-specific bandpass filter.
@@ -495,12 +551,12 @@ class EEGPreprocessor:
         Event map recorded in provenance metadata (no effect on processing).
     skip_if_exists : bool
         If ``True`` *and* ``overwrite=False``, skip the entire computation
-        when the primary output file ``{fname_out}_clean.fif.gz`` already
+        when the primary output file ``*_desc-clean_eeg.fif`` already
         exists and return the previously saved results instead.
     make_report : bool
         If ``True`` (default) and *fname_out* is provided, generate an
         :class:`mne.Report` summarising the preprocessing outputs and save it
-        alongside the other derivatives as ``{fname_out}_report.html``.
+        alongside the other derivatives as ``*_report.html``.
     save_bids_raw : bool
         If ``True`` (default) and *fname_out* is provided, also write
         ``raw_source`` (the untouched input) to the raw part of the BIDS
@@ -643,9 +699,14 @@ class EEGPreprocessor:
         fname_in : str | Path
             Path to the raw input file (XDF or any MNE-readable format).
         fname_out : str | Path | None
-            Output stem for saving derivatives.  Pass ``None`` to skip saving.
+            Where to save the derivatives, as a BIDS-style path such as
+            ``<root>/derivatives/bemobil-mne/sub-01/eeg/sub-01_task-walk_eeg.fif``.
+            Its entities name all outputs (see :func:`get_derivative_paths`),
+            e.g. ``sub-01_task-walk_desc-clean_eeg.fif``. Pass ``None`` to
+            skip saving.
         overwrite : bool
-            Overwrite existing output files.
+            Overwrite existing derivatives. Does not affect the BIDS raw
+            (see ``overwrite_bids_raw``).
 
         Returns
         -------
@@ -677,9 +738,14 @@ class EEGPreprocessor:
         raw : mne.io.BaseRaw
             Recording to preprocess.
         fname_out : str | Path | None
-            Output stem for saving derivatives.  Pass ``None`` to skip saving.
+            Where to save the derivatives, as a BIDS-style path such as
+            ``<root>/derivatives/bemobil-mne/sub-01/eeg/sub-01_task-walk_eeg.fif``.
+            Its entities name all outputs (see :func:`get_derivative_paths`),
+            e.g. ``sub-01_task-walk_desc-clean_eeg.fif``. Pass ``None`` to
+            skip saving.
         overwrite : bool
-            Overwrite existing output files.
+            Overwrite existing derivatives. Does not affect the BIDS raw
+            (see ``overwrite_bids_raw``).
         tier2 : dict | None
             Tier-2 streams from :class:`~bemobil_mne.io.MultimodalRecording`
             (e.g. ``rec.tier2``), kept at native rate and not merged into
@@ -698,14 +764,14 @@ class EEGPreprocessor:
             All other pipeline outputs, keyed by name:
 
             - ``raw_source`` (:class:`mne.io.Raw`): the input exactly as
-              passed to :meth:`run_raw`, nothing done. Saved as
-              ``*_source.fif.gz`` and, with ``save_bids_raw``, to the BIDS
-              raw folder.
+              passed to :meth:`run_raw`, nothing done. Written to the BIDS
+              raw folder when ``save_bids_raw=True``; when loaded from cache,
+              read back from there (``None`` if not found).
             - ``raw_pre_ica`` (:class:`mne.io.Raw`): every step except ICA
               (line-noise removal, bandpass, ASR if enabled). The data ICA
               is fitted on. Bad channels are marked but not interpolated and
               the average reference is still an unapplied projection. Saved
-              as ``*_pre-ICA.fif.gz``; input to :meth:`reapply_ica`.
+              as ``*_desc-preica_eeg.fif``; input to :meth:`reapply_ica`.
             - ``ica`` (:class:`mne.preprocessing.ICA`): the fitted ICA, with
               ``ica.exclude`` set from the ICLabel classification. An
               unfitted stub when ``fit_ica=False``.
@@ -734,7 +800,7 @@ class EEGPreprocessor:
             self.skip_if_exists
             and not overwrite
             and fname_out is not None
-            and Path(fname_out).exists()
+            and get_derivative_paths(fname_out)["clean"].exists()
         ):
             import logging as _log
 
@@ -1017,7 +1083,6 @@ class EEGPreprocessor:
             t0 = time.perf_counter()
             self._save_outputs(
                 fname_out,
-                raw_source=raw_source,
                 raw_clean=raw_clean,
                 raw_pre_ica=raw_pre_ica,
                 ica=ica,
@@ -1064,7 +1129,6 @@ class EEGPreprocessor:
         self,
         fname_out,
         *,
-        raw_source,
         raw_clean,
         raw_pre_ica,
         ica,
@@ -1076,39 +1140,26 @@ class EEGPreprocessor:
         report,
         overwrite,
     ):
-        """Save all pipeline derivatives to disk."""
-        fname_out = Path(fname_out)
-        stem = _output_stem(fname_out)
-        fname_out.parent.mkdir(parents=True, exist_ok=True)
+        """Save all pipeline derivatives to disk (see get_derivative_paths)."""
+        paths = get_derivative_paths(fname_out)
+        paths["clean"].parent.mkdir(parents=True, exist_ok=True)
 
-        # raw_clean is saved to fname_out directly (primary output / skip sentinel)
-        raw_clean.save(fname_out, overwrite=overwrite, verbose="error")
+        # raw_clean is the primary output and the skip_if_exists sentinel
+        raw_clean.save(paths["clean"], overwrite=overwrite, verbose="error")
 
-        raw_source.save(
-            stem.with_name(stem.name + SOURCE_SUFFIX),
-            overwrite=overwrite,
-            verbose="error",
-        )
         # Pre-ICA data (ASR-cleaned if ASR ran, avg-ref still an unapplied
         # projection). Also the input to reapply_ica().
-        raw_pre_ica.save(
-            stem.with_name(stem.name + PRE_ICA_SUFFIX),
-            overwrite=overwrite,
-            verbose="error",
-        )
+        raw_pre_ica.save(paths["pre_ica"], overwrite=overwrite, verbose="error")
         if self.fit_ica and ica.current_fit != "unfitted":
-            ica.save(
-                stem.with_name(stem.name + "_ica.fif.gz"),
-                overwrite=overwrite,
-            )
-            with open(stem.with_name(stem.name + "_iclabels.json"), "w") as f:
+            ica.save(paths["ica"], overwrite=overwrite, verbose="error")
+            with open(paths["iclabels"], "w") as f:
                 json.dump(ic_labels, f, indent=4, cls=NumpyEncoder)
 
-        with open(stem.with_name(stem.name + "_bad_channels.json"), "w") as f:
+        with open(paths["bad_channels"], "w") as f:
             json.dump(bad_ch_dict, f, indent=4, cls=NumpyEncoder)
 
         if dipoles:
-            dipdir = stem.parent / f"{stem.name}_dipoles"
+            dipdir = paths["dipoles"]
             dipdir.mkdir(parents=True, exist_ok=True)
             for i, dip in enumerate(dipoles):
                 if dip is None:
@@ -1124,15 +1175,10 @@ class EEGPreprocessor:
                 )
 
         if dipoles and trans is not None:
-            trans.save(
-                stem.with_name(stem.name + "_trans.fif"),
-                overwrite=overwrite,
-                verbose="error",
-            )
+            trans.save(paths["trans"], overwrite=overwrite, verbose="error")
 
         if report is not None:
-            report_path = stem.with_name(stem.name + "_report.html")
-            report.save(str(report_path), overwrite=overwrite, open_browser=False)
+            report.save(str(paths["report"]), overwrite=overwrite, open_browser=False)
 
     def _save_bids_raw(self, raw_source, fname_out):
         """Write the untouched input to the raw part of the BIDS dataset.
@@ -1184,46 +1230,59 @@ class EEGPreprocessor:
         LOGGER.info(f"save_bids_raw: wrote {bids_path.fpath}")
         return bids_path
 
+    def _read_bids_raw(self, fname_out):
+        """Read the untouched input back from the raw part of the BIDS dataset.
+
+        Returns ``None`` (and logs why) when the BIDS raw cannot be found.
+        """
+        from mne_bids import BIDSPath, read_raw_bids
+
+        try:
+            bids_root, ents = _bids_raw_target(fname_out, self.bids_root)
+        except ValueError as exc:
+            LOGGER.info(f"No BIDS raw for {Path(fname_out).name}: {exc}")
+            return None
+        target = BIDSPath(root=bids_root, datatype="eeg", suffix="eeg", **ents)
+        for ext in (".vhdr", ".edf", ".bdf", ".set"):
+            if target.copy().update(extension=ext).fpath.exists():
+                return read_raw_bids(target.update(extension=ext), verbose=False)
+        LOGGER.info(f"No BIDS raw found at {target.directory / target.basename}.*")
+        return None
+
     def _load_cached_outputs(self, fname_out):
         """Load previously saved pipeline outputs and return the run_raw 3-tuple.
 
         Used by the ``skip_if_exists`` fast-path in :meth:`run_raw` and by
         :meth:`reapply_ica`. Missing auxiliary files yield ``None`` / empty
-        collections. Recordings are not preloaded.
+        collections. Recordings are not preloaded. ``raw_source`` is read
+        from the raw part of the BIDS dataset.
         """
-        fname_out = Path(fname_out)
-        stem = _output_stem(fname_out)
+        paths = get_derivative_paths(fname_out)
 
-        raw_clean = mne.io.read_raw(fname_out, verbose="error")
+        raw_clean = mne.io.read_raw(paths["clean"], verbose="error")
+        raw_source = self._read_bids_raw(fname_out)
 
-        _source_path = stem.with_name(stem.name + SOURCE_SUFFIX)
-        raw_source = (
-            mne.io.read_raw(_source_path, verbose="error")
-            if _source_path.exists()
-            else None
-        )
-
-        _pre_ica_path = stem.with_name(stem.name + PRE_ICA_SUFFIX)
+        _pre_ica_path = paths["pre_ica"]
         raw_pre_ica = (
             mne.io.read_raw(_pre_ica_path, verbose="error")
             if _pre_ica_path.exists()
             else None
         )
 
-        _ica_path = stem.with_name(stem.name + "_ica.fif.gz")
+        _ica_path = paths["ica"]
         ica = (
             mne.preprocessing.read_ica(_ica_path, verbose="error")
             if _ica_path.exists()
             else mne.preprocessing.ICA(method="picard")
         )
 
-        _labels_path = stem.with_name(stem.name + "_iclabels.json")
+        _labels_path = paths["iclabels"]
         ic_labels: dict = {}
         if _labels_path.exists():
             with open(_labels_path) as f:
                 ic_labels = json.load(f)
 
-        _bad_path = stem.with_name(stem.name + "_bad_channels.json")
+        _bad_path = paths["bad_channels"]
         bad_ch_dict: dict = {}
         if _bad_path.exists():
             with open(_bad_path) as f:
@@ -1232,7 +1291,7 @@ class EEGPreprocessor:
         # Dipoles / residuals are saved one file per IC, skipping ICs whose
         # fit was rejected (None). Rebuild lists indexed by IC number so that
         # dipoles[i] belongs to IC i, with None in the gaps.
-        _dipdir = stem.parent / f"{stem.name}_dipoles"
+        _dipdir = paths["dipoles"]
         dipoles: list = []
         residuals: list = []
         if _dipdir.exists():
@@ -1258,7 +1317,7 @@ class EEGPreprocessor:
                 for i in range(n)
             ]
 
-        _trans_path = stem.with_name(stem.name + "_trans.fif")
+        _trans_path = paths["trans"]
         trans = (
             mne.transforms.read_trans(_trans_path, verbose="error")
             if _trans_path.exists()
@@ -1313,8 +1372,9 @@ class EEGPreprocessor:
             ICs to keep even though they were excluded before. Ignored when
             *exclude* is given.
         save : bool
-            If ``True`` (default), overwrite ``fname_out`` (``raw_clean``),
-            the ``_ica.fif.gz`` file and, if made, the report.
+            If ``True`` (default), overwrite the clean recording
+            (``*_desc-clean_eeg.fif``), the ICA file (``*_ica.fif``) and,
+            if made, the report.
         make_report : bool | None
             Regenerate the HTML report. ``None`` (default) uses
             :attr:`make_report`.
@@ -1323,12 +1383,12 @@ class EEGPreprocessor:
         -------
         Same 3-tuple as :meth:`run_raw`: ``(raw_clean, report, metadata)``.
         """
-        fname_out = Path(fname_out)
-        stem = _output_stem(fname_out)
-        if not stem.with_name(stem.name + PRE_ICA_SUFFIX).exists():
+        paths = get_derivative_paths(fname_out)
+        if not paths["pre_ica"].exists():
             raise FileNotFoundError(
-                f"No pre-ICA recording ({stem.name}{PRE_ICA_SUFFIX}) found next to "
-                f"{fname_out}. Re-run the pipeline with fit_ica=True to create it."
+                f"No pre-ICA recording ({paths['pre_ica'].name}) found in "
+                f"{paths['pre_ica'].parent}. Re-run the pipeline with "
+                "fit_ica=True to create it."
             )
 
         _, _, metadata = self._load_cached_outputs(fname_out)
@@ -1402,17 +1462,9 @@ class EEGPreprocessor:
             )
 
         if save:
-            raw_clean.save(fname_out, overwrite=True, verbose="error")
-            ica.save(
-                stem.with_name(stem.name + "_ica.fif.gz"),
-                overwrite=True,
-                verbose="error",
-            )
+            raw_clean.save(paths["clean"], overwrite=True, verbose="error")
+            ica.save(paths["ica"], overwrite=True, verbose="error")
             if report is not None:
-                report.save(
-                    str(stem.with_name(stem.name + "_report.html")),
-                    overwrite=True,
-                    open_browser=False,
-                )
+                report.save(str(paths["report"]), overwrite=True, open_browser=False)
 
         return (raw_clean, report, metadata)

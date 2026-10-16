@@ -9,12 +9,11 @@ import numpy as np
 import pytest
 
 from bemobil_mne.preproc.preprocessing import (
-    PRE_ICA_SUFFIX,
-    SOURCE_SUFFIX,
     EEGPreprocessor,
     _bids_raw_target,
     _output_stem,
     get_bad_chs,
+    get_derivative_paths,
 )
 
 # %% Helpers
@@ -141,9 +140,9 @@ def test_eegpreprocessor_skip_if_exists(tmp_path):
     from unittest.mock import patch
 
     raw = _eeg_raw(n_ch=16, duration=10.0)
-    fname_out = tmp_path / "sub-01_proc-raw.fif"
+    fname_out = tmp_path / "sub-01_task-rest_eeg.fif"
     # Create the sentinel file that skip_if_exists actually checks
-    fname_out.touch()
+    get_derivative_paths(fname_out)["clean"].touch()
 
     proc = EEGPreprocessor(loader=None, skip_if_exists=True, fit_ica=False)
     with patch.object(proc, "_load_cached_outputs", return_value=None) as mock_load:
@@ -160,12 +159,38 @@ def test_output_stem_strips_fif_extensions(tmp_path, name):
     assert _output_stem(tmp_path / name) == tmp_path / "sub-01_clean"
 
 
+@pytest.mark.parametrize(
+    ("name", "ext"),
+    [
+        ("sub-01_ses-01_task-walk_run-01_eeg.fif.gz", ".fif.gz"),
+        ("sub-01_ses-01_task-walk_run-01_eeg.fif", ".fif"),
+        ("sub-01_ses-01_task-walk_run-01_desc-clean_eeg.fif", ".fif"),
+        ("sub-01_ses-01_task-walk_run-01", ".fif"),
+    ],
+)
+def test_get_derivative_paths_bids_names(tmp_path, name, ext):
+    """Keep the entities, drop suffix and desc, add BIDS desc labels/suffixes."""
+    paths = get_derivative_paths(tmp_path / name)
+    base = "sub-01_ses-01_task-walk_run-01"
+    assert paths == {
+        "clean": tmp_path / f"{base}_desc-clean_eeg{ext}",
+        "pre_ica": tmp_path / f"{base}_desc-preica_eeg{ext}",
+        "ica": tmp_path / f"{base}_ica{ext}",
+        "iclabels": tmp_path / f"{base}_iclabels.json",
+        "bad_channels": tmp_path / f"{base}_badchannels.json",
+        "dipoles": tmp_path / f"{base}_dipoles",
+        "trans": tmp_path / f"{base}_trans.fif",
+        "report": tmp_path / f"{base}_report.html",
+    }
+
+
 def test_load_cached_outputs_aligns_dipoles_by_ic_index(tmp_path):
     """Place loaded dipoles at their IC index, with None for missing fits."""
     raw = _eeg_raw(n_ch=8, duration=5.0)
-    fname_out = tmp_path / "sub-01_clean.fif.gz"
-    raw.save(fname_out, verbose="error")
-    dipdir = tmp_path / "sub-01_clean_dipoles"
+    fname_out = tmp_path / "sub-01_task-rest_eeg.fif.gz"
+    paths = get_derivative_paths(fname_out)
+    raw.save(paths["clean"], verbose="error")
+    dipdir = paths["dipoles"]
     dipdir.mkdir()
     dip = mne.Dipole(
         times=[0.0],
@@ -190,8 +215,8 @@ def test_load_cached_outputs_aligns_dipoles_by_ic_index(tmp_path):
 def test_reapply_ica_requires_pre_ica_file(tmp_path):
     """Raise a clear error when the pre-ICA recording was never saved."""
     raw = _eeg_raw(n_ch=8, duration=5.0)
-    fname_out = tmp_path / "sub-01_clean.fif.gz"
-    raw.save(fname_out, verbose="error")
+    fname_out = tmp_path / "sub-01_task-rest_eeg.fif.gz"
+    raw.save(get_derivative_paths(fname_out)["clean"], verbose="error")
     proc = EEGPreprocessor(loader=None)
     with pytest.raises(FileNotFoundError, match="pre-ICA"):
         proc.reapply_ica(fname_out, add=[0])
@@ -213,10 +238,10 @@ def test_eegpreprocessor_full_run_no_dipoles(tmp_path, sample_raw):
         fit_dipoles=False,
         skip_if_exists=False,
     )
-    fname_out = tmp_path / "sub-01_proc-raw.fif"
+    fname_out = tmp_path / "sub-01_task-rest_eeg.fif"
     raw_out, report, metadata = proc.run_raw(sample_raw, fname_out=fname_out)
 
-    assert fname_out.exists()
+    assert get_derivative_paths(fname_out)["clean"].exists()
     assert raw_out is not None
     assert raw_out.info["sfreq"] == pytest.approx(sample_raw.info["sfreq"], rel=0.1)
 
@@ -233,12 +258,14 @@ def test_eegpreprocessor_reapply_ica(tmp_path, sample_raw):
         ica_method="picard",
         make_report=False,
     )
-    fname_out = tmp_path / "sub-01_clean.fif.gz"
+    fname_out = _deriv_fname(tmp_path)
+    paths = get_derivative_paths(fname_out)
     _, _, metadata = proc.run_raw(sample_raw.copy(), fname_out=fname_out)
 
-    assert (tmp_path / f"sub-01_clean{PRE_ICA_SUFFIX}").exists()
-    assert (tmp_path / f"sub-01_clean{SOURCE_SUFFIX}").exists()
-    assert not (tmp_path / "sub-01_clean_minimal.fif.gz").exists()
+    assert paths["pre_ica"].exists()
+    # The untouched input goes to the BIDS raw folder, not the derivatives
+    assert not list(paths["clean"].parent.glob("*source*"))
+    assert (tmp_path / "sub-01" / "ses-01" / "eeg").exists()
     assert "raw_minimal" not in metadata
     np.testing.assert_allclose(metadata["raw_source"].get_data(), sample_raw.get_data())
 
@@ -250,9 +277,8 @@ def test_eegpreprocessor_reapply_ica(tmp_path, sample_raw):
 
     expected = sorted(set(auto_exclude) | {extra})
     assert md["ica"].exclude == expected
-    reloaded = mne.preprocessing.read_ica(
-        tmp_path / "sub-01_clean_ica.fif.gz", verbose="error"
-    )
+    assert md["raw_source"] is not None  # read back from the BIDS raw
+    reloaded = mne.preprocessing.read_ica(paths["ica"], verbose="error")
     assert sorted(reloaded.exclude) == expected
     assert raw_clean.info["bads"] == []
 
@@ -269,15 +295,16 @@ def test_eegpreprocessor_skip_if_exists_integration(tmp_path, sample_raw):
         fit_ica=False,
         skip_if_exists=True,
     )
-    fname_out = tmp_path / "sub-01_proc-raw.fif"
+    fname_out = tmp_path / "sub-01_task-rest_eeg.fif"
+    clean = get_derivative_paths(fname_out)["clean"]
 
     # First run - creates the file
     proc.run_raw(sample_raw, fname_out=fname_out)
-    mtime_1 = fname_out.stat().st_mtime
+    mtime_1 = clean.stat().st_mtime
 
     # Second run - should skip
     proc.run_raw(sample_raw, fname_out=fname_out)
-    mtime_2 = fname_out.stat().st_mtime
+    mtime_2 = clean.stat().st_mtime
 
     assert mtime_1 == mtime_2, "File should not have been rewritten"
 
@@ -404,3 +431,19 @@ def test_save_bids_raw_warns_without_root(tmp_path):
     proc = EEGPreprocessor(loader=None)
     with pytest.warns(UserWarning, match="save_bids_raw skipped"):
         assert proc._save_bids_raw(raw, tmp_path / "sub-01_task-walk_eeg.fif") is None
+
+
+def test_load_cached_outputs_reads_source_from_bids(tmp_path):
+    """raw_source comes back from the BIDS raw folder, not from derivatives."""
+    raw = _eeg_raw(n_ch=8, duration=5.0)
+    fname_out = _deriv_fname(tmp_path)
+    paths = get_derivative_paths(fname_out)
+    raw.save(paths["clean"], verbose="error")
+    proc = EEGPreprocessor(loader=None)
+
+    _, _, md = proc._load_cached_outputs(fname_out)
+    assert md["raw_source"] is None  # nothing written to BIDS yet
+
+    proc._save_bids_raw(raw, fname_out)
+    _, _, md = proc._load_cached_outputs(fname_out)
+    np.testing.assert_allclose(md["raw_source"].get_data(), raw.get_data(), atol=1e-9)

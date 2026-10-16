@@ -14,6 +14,7 @@ import mne
 import numpy as np
 
 import bemobil_mne
+from bemobil_mne.preproc import get_derivative_paths
 from bemobil_mne.viz import (
     glue_imgs,
     plot_ERP,
@@ -34,16 +35,24 @@ from bemobil_mne.viz import (
 save_path = (
     Path(bemobil_mne.__file__).parent.parent / "reports" / "preprocess_plot_example"
 )
-fname_out = save_path / "testfile"
+fname_out = (
+    save_path
+    / "derivatives"
+    / "bemobil-mne"
+    / "sub-001"
+    / "eeg"
+    / "sub-001_task-imagery_run-06_eeg.fif"
+)
+paths = get_derivative_paths(fname_out)
 
-raw_pre_ica = mne.io.read_raw(f"{fname_out}_pre-ICA.fif.gz", verbose="error")
-raw_clean = mne.io.read_raw(f"{fname_out}_clean.fif.gz", verbose="error", preload=True)
-ica = mne.preprocessing.read_ica(f"{fname_out}_ica.fif.gz", verbose="error")
+raw_pre_ica = mne.io.read_raw(paths["pre_ica"], verbose="error")
+raw_clean = mne.io.read_raw(paths["clean"], verbose="error", preload=True)
+ica = mne.preprocessing.read_ica(paths["ica"], verbose="error")
 
-with open(f"{fname_out}_iclabels.json") as fin:
+with open(paths["iclabels"]) as fin:
     ic_labels = json.load(fin)
 
-with open(f"{fname_out}_bad_channels.json") as fin:
+with open(paths["bad_channels"]) as fin:
     bad_ch_dict = json.load(fin)
 
 # %%

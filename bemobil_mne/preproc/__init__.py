@@ -11,6 +11,7 @@ from bemobil_mne.preproc.preprocessing import (
     EEGPreprocessor,
     NumpyEncoder,
     get_bad_chs,
+    get_derivative_paths,
 )
 from bemobil_mne.preproc.utils import (
     StepTimer,
@@ -36,6 +37,7 @@ from bemobil_mne.preproc.utils import (
 __all__ = [
     # Classes
     "EEGPreprocessor",
+    "get_derivative_paths",
     # Report
     "make_report",
     "EpochPreparer",

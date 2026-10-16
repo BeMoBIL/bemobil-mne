@@ -760,8 +760,8 @@ def make_report(
         processing (no renaming, line-noise removal, filtering or
         re-referencing). Its traces and PSD are shown next to ``raw clean``
         so the effect of the full pipeline is visible. If ``None`` (e.g. when
-        rebuilding a report from cached outputs without a saved source
-        file), ``raw_pre_ica`` is shown instead.
+        rebuilding a report from cached outputs and the BIDS raw cannot be
+        found), ``raw_pre_ica`` is shown instead.
     """
     # Force headless Agg backend so report generation works without a display
     matplotlib.use("Agg", force=True)
