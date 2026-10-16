@@ -153,7 +153,7 @@ def _bids_raw_target(fname_out, bids_root=None):
 def get_bad_chs(
     raw,
     pyprep_kwargs=None,
-    notch_lines=None,
+    notch_lines="europe",
     notch_width=1.0,
     line_noise_crit=None,
     deviation_threshold=3.5,
@@ -181,7 +181,7 @@ def get_bad_chs(
     notch_lines : float | array-like | ``"europe"`` | ``"usa"`` | None
         The line frequencies for notch filtering. Strings ``"europe"`` and
         ``"usa"`` expand to 50/100/150 Hz and 60/120/180 Hz respectively.
-        Pass ``None`` to skip notch filtering.
+        Defaults to ``"europe"``. Pass ``None`` to skip notch filtering.
     notch_width : float
         Width of the notch filter in Hz.
     line_noise_crit : float | None
@@ -222,9 +222,6 @@ def get_bad_chs(
     """
     raw = raw.copy()
 
-    if notch_lines is None:
-        notch_lines = np.arange(50, 151, 50)
-
     if isinstance(notch_lines, str):
         if notch_lines == "europe":
             notch_lines = np.arange(50, 151, 50)
@@ -256,15 +253,12 @@ def get_bad_chs(
         )
 
     # === PyPREP ====
-    default_pyprep_kwargs = {"reject_by_annotation": "omit"}
-    if pyprep_kwargs is not None:
-        default_pyprep_kwargs.update(pyprep_kwargs)
-    else:
-        pyprep_kwargs = default_pyprep_kwargs
+    # Merge user kwargs into the defaults (without mutating the caller's dict)
+    pyprep_kwargs = {"reject_by_annotation": "omit", **(pyprep_kwargs or {})}
 
-    bad_by_manual = pyprep_kwargs.get("bad_by_manual", [])
-    bad_by_manual = list(set(bad_by_manual + raw.info["bads"]))
-    pyprep_kwargs.update({"bad_by_manual": bad_by_manual})
+    bad_by_manual = list(pyprep_kwargs.get("bad_by_manual") or [])
+    bad_by_manual = sorted(set(bad_by_manual) | set(raw.info["bads"]))
+    pyprep_kwargs["bad_by_manual"] = bad_by_manual
 
     noisy_channels = NoisyChannels(raw, **pyprep_kwargs)
     noisy_channels.find_bad_by_nan_flat()
@@ -302,7 +296,7 @@ def get_bad_chs(
     bad_chs.update(bad_by_line_noise)
 
     bad_ch_dict = {
-        "all_bads": list(bad_chs),
+        "all_bads": sorted(bad_chs),
         "pyprep": bads_dict_pyprep,
         "faster": bads_dict_faster,
         "bad_by_line_noise": bad_by_line_noise,

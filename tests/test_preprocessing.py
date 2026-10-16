@@ -447,3 +447,38 @@ def test_load_cached_outputs_reads_source_from_bids(tmp_path):
     proc._save_bids_raw(raw, fname_out)
     _, _, md = proc._load_cached_outputs(fname_out)
     np.testing.assert_allclose(md["raw_source"].get_data(), raw.get_data(), atol=1e-9)
+
+
+def test_get_bad_chs_keeps_default_pyprep_kwargs():
+    """Merge user pyprep_kwargs into the defaults without mutating them."""
+    from unittest.mock import patch
+
+    from bemobil_mne.preproc import preprocessing as pp
+
+    captured = {}
+    real = pp.NoisyChannels
+
+    def _spy(raw, **kwargs):
+        captured.update(kwargs)
+        return real(raw, **kwargs)
+
+    raw = _eeg_raw(n_ch=16)
+    raw.info["bads"] = [raw.ch_names[0]]
+    user_kwargs = {"random_state": 1}
+    with patch.object(pp, "NoisyChannels", side_effect=_spy):
+        get_bad_chs(raw, pyprep_kwargs=user_kwargs, notch_lines=None)
+
+    assert captured["reject_by_annotation"] == "omit"
+    assert captured["random_state"] == 1
+    assert captured["bad_by_manual"] == [raw.ch_names[0]]
+    assert user_kwargs == {"random_state": 1}
+
+
+def test_get_bad_chs_none_skips_notch():
+    """Do not call notch_filter when notch_lines is None."""
+    from unittest.mock import patch
+
+    raw = _eeg_raw(n_ch=16)
+    with patch.object(mne.io.BaseRaw, "notch_filter") as notch:
+        get_bad_chs(raw, notch_lines=None)
+    notch.assert_not_called()
