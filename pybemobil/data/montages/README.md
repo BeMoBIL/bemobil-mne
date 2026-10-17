@@ -9,9 +9,9 @@ The files are installed with the package. To use the corrected montage:
 ```python
 from importlib.resources import files
 
-from bemobil_mne.io import XDFLoader
+from pybemobil.io import XDFLoader
 
-montage_dir = files("bemobil_mne") / "data" / "montages"
+montage_dir = files("pybemobil") / "data" / "montages"
 loader = XDFLoader(montage=montage_dir / "standard_MoBI_128_corrected.fif")
 # or: mne.channels.read_dig_fif(montage_dir / "standard_MoBI_128_corrected.fif")
 ```

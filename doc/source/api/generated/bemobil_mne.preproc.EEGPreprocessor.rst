@@ -1,7 +1,7 @@
 ﻿bemobil\_mne.preproc.EEGPreprocessor
 ====================================
 
-.. currentmodule:: bemobil_mne.preproc
+.. currentmodule:: pybemobil.preproc
 
 .. autoclass:: EEGPreprocessor
 

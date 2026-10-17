@@ -15,8 +15,8 @@ import mne_faster
 import numpy as np
 from pyprep import NoisyChannels
 
-from bemobil_mne.io.utils import NumpyEncoder as _NumpyEncoder
-from bemobil_mne.preproc.utils import (
+from pybemobil.io.utils import NumpyEncoder as _NumpyEncoder
+from pybemobil.preproc.utils import (
     StepTimer,
     _annotate_break_iter,
     _handle_trans,
@@ -519,9 +519,9 @@ class EEGPreprocessor:
         - ``False`` (default): skip ASR; ``raw_pre_ica`` is the bandpassed,
           average-reference-projected data.
         - ``True``: run ASR with the default parameters of
-          :func:`~bemobil_mne.preproc.utils.compute_asr`.
+          :func:`~pybemobil.preproc.utils.compute_asr`.
         - ``dict``: run ASR and pass the dict as keyword arguments to
-          :func:`~bemobil_mne.preproc.utils.compute_asr` (e.g.
+          :func:`~pybemobil.preproc.utils.compute_asr` (e.g.
           ``{"cutoff": 10, "estimator": "lwf"}``).
 
         Either way, ``raw_pre_ica`` is the data ICA is applied to, and it is
@@ -717,9 +717,9 @@ class EEGPreprocessor:
     ) -> tuple:
         """Load *fname_in* and run the full preprocessing pipeline.
 
-        Uses :attr:`loader` (an :class:`~bemobil_mne.io.XDFLoader`), whose
-        :meth:`~bemobil_mne.io.XDFLoader.load` returns a
-        :class:`~bemobil_mne.io.MultimodalRecording`.  Only the Tier-1
+        Uses :attr:`loader` (an :class:`~pybemobil.io.XDFLoader`), whose
+        :meth:`~pybemobil.io.XDFLoader.load` returns a
+        :class:`~pybemobil.io.MultimodalRecording`.  Only the Tier-1
         ``raw`` object is preprocessed; ``tier2`` is forwarded to
         :meth:`run_raw` for the report's drop-out plots, and ``events`` is
         discarded (call :meth:`run_raw` directly if you need it).
@@ -735,7 +735,7 @@ class EEGPreprocessor:
             Path to the raw input file (XDF or any MNE-readable format).
         fname_out : str | Path | None
             Where to save the derivatives, as a BIDS-style path such as
-            ``<root>/derivatives/bemobil-mne/sub-01/eeg/sub-01_task-walk_eeg.fif``.
+            ``<root>/derivatives/pybemobil/sub-01/eeg/sub-01_task-walk_eeg.fif``.
             Its entities name all outputs (see :func:`get_derivative_paths`),
             e.g. ``sub-01_task-walk_desc-clean_eeg.fif``. Pass ``None`` to
             skip saving.
@@ -778,7 +778,7 @@ class EEGPreprocessor:
             Recording to preprocess.
         fname_out : str | Path | None
             Where to save the derivatives, as a BIDS-style path such as
-            ``<root>/derivatives/bemobil-mne/sub-01/eeg/sub-01_task-walk_eeg.fif``.
+            ``<root>/derivatives/pybemobil/sub-01/eeg/sub-01_task-walk_eeg.fif``.
             Its entities name all outputs (see :func:`get_derivative_paths`),
             e.g. ``sub-01_task-walk_desc-clean_eeg.fif``. Pass ``None`` to
             skip saving.
@@ -786,7 +786,7 @@ class EEGPreprocessor:
             Overwrite existing derivatives. Does not affect the BIDS raw
             (see ``overwrite_bids_raw``).
         tier2 : dict | None
-            Tier-2 streams from :class:`~bemobil_mne.io.MultimodalRecording`
+            Tier-2 streams from :class:`~pybemobil.io.MultimodalRecording`
             (e.g. ``rec.tier2``), kept at native rate and not merged into
             *raw*.  When provided and ``make_report=True``, each stream is
             plotted in full (decimated envelope, with drop-outs shaded) in
@@ -1143,7 +1143,7 @@ class EEGPreprocessor:
         # Built after saving so a failing report never costs the derivatives.
         report = None
         if self.make_report:
-            from bemobil_mne.preproc.make_report import make_report as _make_report
+            from pybemobil.preproc.make_report import make_report as _make_report
 
             report = _try_report(
                 _make_report,
@@ -1256,7 +1256,7 @@ class EEGPreprocessor:
         """
         from mne_bids import BIDSPath
 
-        from bemobil_mne.io.bids_export import export_to_bids
+        from pybemobil.io.bids_export import export_to_bids
 
         try:
             bids_root, ents = _bids_raw_target(fname_out, self.bids_root)
@@ -1511,7 +1511,7 @@ class EEGPreprocessor:
 
         report = None
         if self.make_report if make_report is None else make_report:
-            from bemobil_mne.preproc.make_report import make_report as _make_report
+            from pybemobil.preproc.make_report import make_report as _make_report
 
             raw_source = metadata["raw_source"]
             report = _try_report(

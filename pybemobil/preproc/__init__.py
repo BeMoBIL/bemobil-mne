@@ -1,19 +1,19 @@
-"""Preprocessing utilities for BeMoBIL-MNE."""
+"""Preprocessing utilities for PyBeMoBIL."""
 
-from bemobil_mne.preproc.epoching import EpochPreparer, get_stimulus_rename_map
-from bemobil_mne.preproc.motion import (
+from pybemobil.preproc.epoching import EpochPreparer, get_stimulus_rename_map
+from pybemobil.preproc.motion import (
     find_rigid_bodies,
     process_rigid_body,
     split_by_rigid_body,
 )
-from bemobil_mne.preproc.make_report import make_report
-from bemobil_mne.preproc.preprocessing import (
+from pybemobil.preproc.make_report import make_report
+from pybemobil.preproc.preprocessing import (
     EEGPreprocessor,
     NumpyEncoder,
     get_bad_chs,
     get_derivative_paths,
 )
-from bemobil_mne.preproc.utils import (
+from pybemobil.preproc.utils import (
     StepTimer,
     _annotate_break_iter,
     _handle_trans,

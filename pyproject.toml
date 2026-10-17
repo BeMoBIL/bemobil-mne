@@ -3,7 +3,7 @@ build-backend = "hatchling.build"
 requires = ["hatch-vcs", "hatchling"]
 
 [project]
-authors = [{name = "The BeMoBIL-MNE team"}]
+authors = [{name = "The PyBeMoBIL team"}]
 classifiers = [
   "Intended Audience :: Science/Research",
   "Operating System :: MacOS",
@@ -48,13 +48,13 @@ license = {text = "Roy Eric Random. All rights reserved."}
 maintainers = [
   {email = "eric.wieske@gmail.com", name = "Roy Eric Wieske"},
 ]
-name = "BeMoBIL-MNE"
+name = "pybemobil"
 readme = {content-type = "text/markdown", file = "README.md"}
 requires-python = ">=3.11"
 
 [project.optional-dependencies]
 # Dependencies for developer installations
-dev = ["build", "BeMoBIL-MNE[test]", "ipykernel", "ipython", "pre-commit", "ruff", "twine"]
+dev = ["build", "pybemobil[test]", "ipykernel", "ipython", "pre-commit", "ruff", "twine"]
 # Dependencies for building the documentation
 docs = [
     "sphinx>=7",
@@ -67,12 +67,12 @@ docs = [
 # when this is not installed.
 jamica = ["jamica[jax]"]
 # Dependencies for running the test infrastructure
-test = ["BeMoBIL-MNE[jamica]", "pytest", "pytest-cov", "pytest-sugar", "pytest-xdist"]
+test = ["pybemobil[jamica]", "pytest", "pytest-cov", "pytest-sugar", "pytest-xdist"]
 
 [project.urls]
-"Bug Tracker" = "https://github.com/BeMoBIL/bemobil-mne/issues/"
-"Documentation" = "https://bemobil.github.io/bemobil-mne/"
-"Source Code" = "https://github.com/BeMoBIL/bemobil-mne/"
+"Bug Tracker" = "https://github.com/BeMoBIL/pybemobil/issues/"
+"Documentation" = "https://bemobil.github.io/pybemobil/"
+"Source Code" = "https://github.com/BeMoBIL/pybemobil/"
 
 [tool.hatch.build]
 exclude = [
@@ -81,7 +81,7 @@ exclude = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["bemobil_mne"]
+packages = ["pybemobil"]
 
 [tool.hatch.metadata]
 allow-direct-references = true  # allow specifying URLs in our dependencies
@@ -91,7 +91,7 @@ raw-options = {version_scheme = "release-branch-semver"}
 source = "vcs"
 
 [tool.pytest.ini_options]
-addopts = """--cov=bemobil_mne --cov-report=html --cov-config=pyproject.toml
+addopts = """--cov=pybemobil --cov-report=html --cov-config=pyproject.toml
     --durations=20 -ra --junit-xml=junit-results.xml --tb=short
     --ignore=doc -n auto"""
 filterwarnings = [
@@ -101,8 +101,8 @@ filterwarnings = [
 testpaths = ["tests"]
 
 [tool.coverage.run]
-omit = ["*tests*", "bemobil_mne/examples/*"]
-source = ["bemobil_mne"]
+omit = ["*tests*", "pybemobil/examples/*"]
+source = ["pybemobil"]
 # Required for pytest-xdist: each worker writes its own .coverage.* file
 # which coverage combine merges at the end.
 parallel = true

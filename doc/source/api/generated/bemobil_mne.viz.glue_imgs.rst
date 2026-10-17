@@ -1,6 +1,6 @@
 ﻿bemobil\_mne.viz.glue\_imgs
 ===========================
 
-.. currentmodule:: bemobil_mne.viz
+.. currentmodule:: pybemobil.viz
 
 .. autofunction:: glue_imgs

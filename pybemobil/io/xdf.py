@@ -4,7 +4,7 @@ Handles streams at different sampling rates (EEG, ECG, EMG, eye-tracking,
 EDA, audio, video) by separating them into two tiers and aligning Tier-1
 streams to a common grid via timestamp-aware interpolation.
 
-See bemobil_mne/io/README.md for full design rationale.
+See pybemobil/io/README.md for full design rationale.
 """
 
 # %% Imports
@@ -21,7 +21,7 @@ import mne
 import numpy as np
 import pyxdf
 
-from bemobil_mne.io.alignment import (
+from pybemobil.io.alignment import (
     _compute_effective_srate,
     _is_irregular,
     align_stream_to_timestamps,

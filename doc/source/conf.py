@@ -9,12 +9,12 @@ sys.path.insert(0, str(Path(__file__).parents[2]))
 
 # -- Project information -----------------------------------------------------
 
-project = "BeMoBIL-MNE"
+project = "PyBeMoBIL"
 copyright = "2026, BeMoBIL"  # noqa: A001 (Sphinx setting)
 author = "Roy Eric Wieske"
 
 try:
-    from bemobil_mne import __version__
+    from pybemobil import __version__
 
     release = __version__.split("+")[0]
 except Exception:
@@ -66,7 +66,7 @@ intersphinx_mapping = {
 # -- HTML output -------------------------------------------------------------
 
 html_theme = "pydata_sphinx_theme"
-html_baseurl = "https://bemobil.github.io/bemobil-mne/"
+html_baseurl = "https://bemobil.github.io/pybemobil/"
 html_static_path = ["_static"]
 html_css_files = ["custom.css"]
 
@@ -78,7 +78,7 @@ html_css_files = ["custom.css"]
 html_title = f"{project} {release}\ndocumentation"
 
 html_theme_options = {
-    "github_url": "https://github.com/BeMoBIL/bemobil-mne",
+    "github_url": "https://github.com/BeMoBIL/pybemobil",
     "show_toc_level": 2,
     "navigation_with_keys": True,
     "navbar_end": ["navbar-icon-links", "theme-switcher"],

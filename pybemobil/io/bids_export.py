@@ -1,10 +1,10 @@
-"""BIDS export utilities for bemobil_mne.
+"""BIDS export utilities for pybemobil.
 
 Thin wrappers around :mod:`mne_bids` that apply project conventions and
 optionally record export parameters in the raw object's provenance descriptor.
 
 Requires the ``mne_bids`` package (already a declared dependency of
-``BeMoBIL-MNE``).
+``PyBeMoBIL``).
 """
 
 # %% Imports
@@ -128,7 +128,7 @@ def export_to_bids(
 
     # Record in the caller's provenance descriptor, if it has one
     try:
-        from bemobil_mne.preproc.utils import append_desc, get_descriptor
+        from pybemobil.preproc.utils import append_desc, get_descriptor
 
         if get_descriptor(raw_in) is not None:
             append_desc(

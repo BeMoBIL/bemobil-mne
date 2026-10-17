@@ -2,7 +2,7 @@
 
 Demonstrates:
 - Building a synthetic MNE Raw object with quaternion and position channels
-  following the bemobil_mne naming convention.
+  following the pybemobil naming convention.
 - find_rigid_bodies(raw) - detect rigid body names from channel labels.
 - process_rigid_body(raw, ...) - convert quaternions to Euler angles, compute
   velocity and acceleration.
@@ -17,7 +17,7 @@ Channels follow the convention: <body>_quat_[xyzw], <body>_pos_[xyz].
 import mne
 import numpy as np
 
-from bemobil_mne.preproc import (
+from pybemobil.preproc import (
     find_rigid_bodies,
     process_rigid_body,
     split_by_rigid_body,

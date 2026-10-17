@@ -1,4 +1,4 @@
-"""Tests for bemobil_mne.io.xdf."""
+"""Tests for pybemobil.io.xdf."""
 
 # %% Imports
 
@@ -7,7 +7,7 @@ import logging
 import numpy as np
 import pytest
 
-from bemobil_mne.io.xdf import (
+from pybemobil.io.xdf import (
     _FIF_CH_ABBREVIATIONS,
     _FIF_MAX_CH_LEN,
     XDFLoader,

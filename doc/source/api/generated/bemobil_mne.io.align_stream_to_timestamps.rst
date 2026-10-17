@@ -1,6 +1,6 @@
 ﻿bemobil\_mne.io.align\_stream\_to\_timestamps
 =============================================
 
-.. currentmodule:: bemobil_mne.io
+.. currentmodule:: pybemobil.io
 
 .. autofunction:: align_stream_to_timestamps

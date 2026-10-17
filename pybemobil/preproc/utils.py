@@ -135,7 +135,7 @@ def init_descriptor(source=None, pipeline=""):
         ``versions``, and an empty ``steps`` list.
     """
     try:
-        bpn_ver = version("bemobil-mne")
+        bpn_ver = version("pybemobil")
     except PackageNotFoundError:
         bpn_ver = "unknown"
 
@@ -155,7 +155,7 @@ def init_descriptor(source=None, pipeline=""):
         "pipeline": pipeline,
         "input": src,
         "timestamp": datetime.datetime.now().isoformat(),
-        "versions": {"bemobil_mne": bpn_ver, "mne": mne_ver},
+        "versions": {"pybemobil": bpn_ver, "mne": mne_ver},
         "steps": [],
     }
 
@@ -349,7 +349,7 @@ def build_sys_info(source_data=None):
 
     pkg_lines = ["Installed packages", "------------------", ""]
     for pkg in (
-        "bemobil-mne",
+        "pybemobil",
         "mne",
         "mne-icalabel",
         "mne-faster",

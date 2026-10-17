@@ -1,6 +1,6 @@
 ﻿bemobil\_mne.viz.plot\_various\_ERPs
 ====================================
 
-.. currentmodule:: bemobil_mne.viz
+.. currentmodule:: pybemobil.viz
 
 .. autofunction:: plot_various_ERPs

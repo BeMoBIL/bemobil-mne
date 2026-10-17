@@ -1,4 +1,4 @@
-"""Tests for bemobil_mne.viz.plotting."""
+"""Tests for pybemobil.viz.plotting."""
 
 # %% Imports
 
@@ -11,7 +11,7 @@ import mne  # noqa: E402
 import numpy as np  # noqa: E402
 import pytest  # noqa: E402
 
-from bemobil_mne.viz import (  # noqa: E402
+from pybemobil.viz import (  # noqa: E402
     plot_ERP,
     plot_PSD,
     plot_psd_topomaps,
@@ -19,7 +19,7 @@ from bemobil_mne.viz import (  # noqa: E402
     plot_tfr_topomaps,
     plot_various_ERPs,
 )
-from bemobil_mne.viz.plotting import _validate_interval  # noqa: E402
+from pybemobil.viz.plotting import _validate_interval  # noqa: E402
 
 # %% Fixtures
 

@@ -1,6 +1,6 @@
 ﻿bemobil\_mne.preproc.fit\_dipoles\_on\_ica
 ==========================================
 
-.. currentmodule:: bemobil_mne.preproc
+.. currentmodule:: pybemobil.preproc
 
 .. autofunction:: fit_dipoles_on_ica

@@ -1,4 +1,4 @@
-"""Tests for bemobil_mne.preproc.make_report."""
+"""Tests for pybemobil.preproc.make_report."""
 
 # %% Imports
 
@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 import mne
 import pytest
 
-from bemobil_mne.preproc import make_report
+from pybemobil.preproc import make_report
 
 # %% Helpers
 
@@ -78,7 +78,7 @@ def test_make_report_runs(rng, event_id):
 
 def test_joint_plot_file_names_are_portable(tmp_path):
     """Joint-plot PNGs get BIDS-style, Windows-safe names."""
-    from bemobil_mne.preproc.make_report import _derivative_base, _safe_label
+    from pybemobil.preproc.make_report import _derivative_base, _safe_label
 
     assert _safe_label("trialStart;condition:A/stimulus:x") == (
         "trialStart-condition-A-stimulus-x"

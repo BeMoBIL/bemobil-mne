@@ -1,4 +1,4 @@
-"""Tests for bemobil_mne.preproc.utils."""
+"""Tests for pybemobil.preproc.utils."""
 
 # %% Imports
 
@@ -10,7 +10,7 @@ import mne
 import numpy as np
 import pytest
 
-from bemobil_mne.preproc.utils import (
+from pybemobil.preproc.utils import (
     StepTimer,
     append_desc,
     build_sys_info,
@@ -474,7 +474,7 @@ def test_compute_ica_popularity_vote_labels(rng, kwargs, expected):
     """Popularity vote honours exclude_labels and include_labels."""
     from unittest.mock import patch
 
-    from bemobil_mne.preproc import utils
+    from pybemobil.preproc import utils
 
     montage = mne.channels.make_standard_montage("easycap-M1")
     info = mne.create_info(montage.ch_names[:8], 250.0, "eeg")

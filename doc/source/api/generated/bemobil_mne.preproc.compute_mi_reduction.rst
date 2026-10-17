@@ -1,6 +1,6 @@
 ﻿bemobil\_mne.preproc.compute\_mi\_reduction
 ===========================================
 
-.. currentmodule:: bemobil_mne.preproc
+.. currentmodule:: pybemobil.preproc
 
 .. autofunction:: compute_mi_reduction

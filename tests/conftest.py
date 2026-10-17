@@ -1,4 +1,4 @@
-"""Shared pytest fixtures and configuration for bemobil_mne tests."""
+"""Shared pytest fixtures and configuration for pybemobil tests."""
 
 # %% Imports
 

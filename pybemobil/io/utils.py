@@ -1,4 +1,4 @@
-"""Holds helpers for I/O operations in the BeMoBIL-MNE."""
+"""Holds helpers for I/O operations in the PyBeMoBIL."""
 
 # %% Imports
 

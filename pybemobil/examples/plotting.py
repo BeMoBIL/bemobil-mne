@@ -13,9 +13,9 @@ import matplotlib.pyplot as plt
 import mne
 import numpy as np
 
-import bemobil_mne
-from bemobil_mne.preproc import get_derivative_paths
-from bemobil_mne.viz import (
+import pybemobil
+from pybemobil.preproc import get_derivative_paths
+from pybemobil.viz import (
     glue_imgs,
     plot_ERP,
     plot_evoked_data,
@@ -33,12 +33,12 @@ from bemobil_mne.viz import (
 
 # These files are produced by preprocessing.py.
 save_path = (
-    Path(bemobil_mne.__file__).parent.parent / "reports" / "preprocess_plot_example"
+    Path(pybemobil.__file__).parent.parent / "reports" / "preprocess_plot_example"
 )
 fname_out = (
     save_path
     / "derivatives"
-    / "bemobil-mne"
+    / "pybemobil"
     / "sub-001"
     / "eeg"
     / "sub-001_task-imagery_run-06_eeg.fif"
@@ -229,7 +229,7 @@ fig = plot_various_ERPs(
 
 # %% TFR (a.k.a. ERSP, ERDS, etc.)
 
-# Note: `plot_ERSP` is deprecated in bemobil_mne; use `plot_TFR` instead.
+# Note: `plot_ERSP` is deprecated in pybemobil; use `plot_TFR` instead.
 
 # For raw EEG data
 figs = plot_TFR(

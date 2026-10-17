@@ -12,13 +12,13 @@ Loading
 -------
 
 The central entry point for reading XDF files.
-:class:`~bemobil_mne.io.XDFLoader` handles stream detection, resampling, and
+:class:`~pybemobil.io.XDFLoader` handles stream detection, resampling, and
 multi-stream alignment in one call, returning a
-:class:`~bemobil_mne.io.MultimodalRecording` that bundles the merged
+:class:`~pybemobil.io.MultimodalRecording` that bundles the merged
 :class:`mne.io.Raw` object together with any Tier-2 (high-rate) streams and
 irregular event streams.
 
-.. currentmodule:: bemobil_mne.io
+.. currentmodule:: pybemobil.io
 
 .. autosummary::
    :toctree: generated/

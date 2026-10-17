@@ -13,7 +13,7 @@ conditions in a single call.
 Power spectral density
 -----------------------
 
-.. currentmodule:: bemobil_mne.viz
+.. currentmodule:: pybemobil.viz
 
 .. autosummary::
    :toctree: generated/
