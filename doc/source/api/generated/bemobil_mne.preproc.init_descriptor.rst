@@ -1,6 +1,6 @@
 ﻿bemobil\_mne.preproc.init\_descriptor
 =====================================
 
-.. currentmodule:: bemobil_mne.preproc
+.. currentmodule:: pybemobil.preproc
 
 .. autofunction:: init_descriptor

@@ -1,6 +1,6 @@
 ﻿bemobil\_mne.preproc.compute\_ica
 =================================
 
-.. currentmodule:: bemobil_mne.preproc
+.. currentmodule:: pybemobil.preproc
 
 .. autofunction:: compute_ica

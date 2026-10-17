@@ -1,4 +1,4 @@
-"""BIDS export using mne_bids wrappers in bemobil_mne.io.
+"""BIDS export using mne_bids wrappers in pybemobil.io.
 
 Demonstrates:
 - export_to_bids: export a single Raw object to a BIDS directory tree.
@@ -18,7 +18,7 @@ from pathlib import Path
 import mne
 from mne.datasets import eegbci
 
-from bemobil_mne.io import (
+from pybemobil.io import (
     batch_export_to_bids,
     export_to_bids,
     make_bids_dataset_description,

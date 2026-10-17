@@ -1,6 +1,6 @@
 ﻿bemobil\_mne.viz.plot\_topo
 ===========================
 
-.. currentmodule:: bemobil_mne.viz
+.. currentmodule:: pybemobil.viz
 
 .. autofunction:: plot_topo

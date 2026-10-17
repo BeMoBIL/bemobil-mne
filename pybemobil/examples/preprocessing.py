@@ -11,9 +11,9 @@ import mne
 import mne_bids
 from mne.datasets import eegbci
 
-import bemobil_mne
-from bemobil_mne.preproc import EEGPreprocessor, get_derivative_paths
-from bemobil_mne.preproc.utils import get_descriptor
+import pybemobil
+from pybemobil.preproc import EEGPreprocessor, get_derivative_paths
+from pybemobil.preproc.utils import get_descriptor
 
 # %%
 # Load raw data to show the functionality
@@ -39,15 +39,15 @@ event_id = {"T0": 1, "T1": 2, "T2": 3}
 # %%
 # Some further settings
 
-# save_path acts as a BIDS root. Derivatives go to derivatives/bemobil-mne/,
+# save_path acts as a BIDS root. Derivatives go to derivatives/pybemobil/,
 # and the untouched input is written to the BIDS raw folder sub-001/eeg/.
 save_path = (
-    Path(bemobil_mne.__file__).parent.parent / "reports" / "preprocess_plot_example"
+    Path(pybemobil.__file__).parent.parent / "reports" / "preprocess_plot_example"
 )
 fname_out = (
     save_path
     / "derivatives"
-    / "bemobil-mne"
+    / "pybemobil"
     / "sub-001"
     / "eeg"
     / "sub-001_task-imagery_run-06_eeg.fif"

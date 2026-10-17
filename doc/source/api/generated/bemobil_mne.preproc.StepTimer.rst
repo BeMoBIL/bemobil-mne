@@ -1,7 +1,7 @@
 ﻿bemobil\_mne.preproc.StepTimer
 ==============================
 
-.. currentmodule:: bemobil_mne.preproc
+.. currentmodule:: pybemobil.preproc
 
 .. autoclass:: StepTimer
 

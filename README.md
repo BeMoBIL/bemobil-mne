@@ -1,11 +1,11 @@
-# bemobil-mne
+# pybemobil
 
 MoBI data loading, preprocessing, and visualization built on MNE-Python.
 
 ## Structure
 
 ```md
-bemobil_mne/
+pybemobil/
 ├── io/                          # Data I/O
 │   ├── xdf.py                   # XDFLoader: multimodal XDF loading, stream alignment
 │   ├── alignment.py             # align_stream_to_timestamps (timestamp-aware interpolation)
@@ -39,16 +39,43 @@ bemobil_mne/
 
 **`examples`** - Self-contained scripts demonstrating major features. Run directly or open as notebooks (percent-format cells).
 
-## Quick start
+## Installation
+
+Install the latest release from PyPI:
 
 ```bash
-# Navigate to the repo root, then install in editable mode
-pip install -e .
+pip install pybemobil
 ```
 
+To also install the JAX-accelerated AMICA backend (the default ICA method, which falls back to Picard when this is missing):
+
+```bash
+pip install "pybemobil[jamica]"
+```
+
+Alternatively:
+
+- **Latest development version** from GitHub:
+
+    ```bash
+    pip install git+https://github.com/BeMoBIL/pybemobil.git
+    ```
+
+- **From source**, in editable mode (for development):
+
+    ```bash
+    git clone https://github.com/BeMoBIL/pybemobil.git
+    cd pybemobil
+    pip install -e ".[dev]"
+    ```
+
+We recommend installing into a fresh environment, e.g. `conda create -n pybemobil python=3.12`.
+
+## Quick start
+
 ```python
-from bemobil_mne.io import XDFLoader
-from bemobil_mne.preproc import EEGPreprocessor, find_rigid_bodies
+from pybemobil.io import XDFLoader
+from pybemobil.preproc import EEGPreprocessor, find_rigid_bodies
 
 # Load a multimodal XDF recording
 loader = XDFLoader(montage="easycap-M1")  # or a path to your .elc/.fif
@@ -75,14 +102,14 @@ This is a private repository for BPN lab members. Contributions are made via fea
 1. Clone the repo:
 
     ```bash
-    git clone https://github.com/BeMoBIL/bemobil-mne.git
-    cd bemobil-mne
+    git clone https://github.com/BeMoBIL/pybemobil.git
+    cd pybemobil
     ```
 
-2. Install in editable mode:
+2. Install in editable mode with the development extras:
 
     ```bash
-    pip install -e .
+    pip install -e ".[dev]"
     ```
 
 3. Install pre-commit hooks:

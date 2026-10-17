@@ -1,6 +1,6 @@
 ﻿bemobil\_mne.preproc.append\_desc
 =================================
 
-.. currentmodule:: bemobil_mne.preproc
+.. currentmodule:: pybemobil.preproc
 
 .. autofunction:: append_desc

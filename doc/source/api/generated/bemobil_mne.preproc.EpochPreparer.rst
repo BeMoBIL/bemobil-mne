@@ -1,7 +1,7 @@
 ﻿bemobil\_mne.preproc.EpochPreparer
 ==================================
 
-.. currentmodule:: bemobil_mne.preproc
+.. currentmodule:: pybemobil.preproc
 
 .. autoclass:: EpochPreparer
 

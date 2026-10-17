@@ -1,6 +1,6 @@
 ﻿bemobil\_mne.preproc.sig\_params
 ================================
 
-.. currentmodule:: bemobil_mne.preproc
+.. currentmodule:: pybemobil.preproc
 
 .. autofunction:: sig_params

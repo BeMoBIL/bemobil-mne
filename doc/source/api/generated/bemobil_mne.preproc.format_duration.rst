@@ -1,6 +1,6 @@
 ﻿bemobil\_mne.preproc.format\_duration
 =====================================
 
-.. currentmodule:: bemobil_mne.preproc
+.. currentmodule:: pybemobil.preproc
 
 .. autofunction:: format_duration

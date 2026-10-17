@@ -15,7 +15,7 @@ but commented out. Replace XDF_PATH with your actual file path before running.
 
 import numpy as np
 
-from bemobil_mne.io import MultimodalRecording, XDFLoader, align_stream_to_timestamps
+from pybemobil.io import MultimodalRecording, XDFLoader, align_stream_to_timestamps
 
 # %% Settings & Constants
 

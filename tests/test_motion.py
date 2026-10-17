@@ -1,4 +1,4 @@
-"""Tests for bemobil_mne.preproc.motion."""
+"""Tests for pybemobil.preproc.motion."""
 
 # %% Imports
 
@@ -6,7 +6,7 @@ import mne
 import numpy as np
 import pytest
 
-from bemobil_mne.preproc.motion import (
+from pybemobil.preproc.motion import (
     _lowpass_array,
     _quat_to_euler_zyx,
     _src_to_deriv,

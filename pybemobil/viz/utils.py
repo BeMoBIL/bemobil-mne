@@ -1,4 +1,4 @@
-"""Holds utilities for visualization in the BeMoBIL-MNE."""
+"""Holds utilities for visualization in the PyBeMoBIL."""
 
 # %% Imports
 

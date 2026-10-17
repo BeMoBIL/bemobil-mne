@@ -1,6 +1,6 @@
-"""Visualisation utilities for BeMoBIL-MNE."""
+"""Visualisation utilities for PyBeMoBIL."""
 
-from bemobil_mne.viz.plotting import (
+from pybemobil.viz.plotting import (
     glue_imgs,
     plot_ERP,
     plot_ERSP,

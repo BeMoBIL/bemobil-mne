@@ -1,4 +1,4 @@
-# bemobil_mne.io  -  I/O and Stream Alignment
+# pybemobil.io  -  I/O and Stream Alignment
 
 This module handles loading and aligning multimodal XDF recordings.
 The primary entry point is `XDFLoader`, which wraps `pyxdf` and
@@ -245,7 +245,7 @@ metadata, physiological triggers) that store absolute LSL timestamps.
 ## Usage example
 
 ```python
-from bemobil_mne.io import XDFLoader
+from pybemobil.io import XDFLoader
 
 loader = XDFLoader(
     eeg_stream_type="EEG",
@@ -289,7 +289,7 @@ The alignment function is public and can be used outside of `XDFLoader`:
 
 ```python
 import numpy as np
-from bemobil_mne.io import align_stream_to_timestamps
+from pybemobil.io import align_stream_to_timestamps
 
 # Align any (data, timestamps) pair to a target grid
 aligned = align_stream_to_timestamps(

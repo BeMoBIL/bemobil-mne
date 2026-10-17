@@ -1,4 +1,4 @@
-"""Tests for bemobil_mne.io.bids_export."""
+"""Tests for pybemobil.io.bids_export."""
 
 # %% Imports
 
@@ -9,7 +9,7 @@ import mne_bids
 import numpy as np
 import pytest
 
-from bemobil_mne.io.bids_export import (
+from pybemobil.io.bids_export import (
     batch_export_to_bids,
     export_to_bids,
     make_bids_dataset_description,
@@ -186,7 +186,7 @@ def test_batch_export_with_session_and_run(tmp_path):
 
 def test_export_to_bids_records_provenance_on_input(tiny_raw_with_montage, tmp_path):
     """The BIDS export step is recorded in the caller's descriptor."""
-    from bemobil_mne.preproc.utils import (
+    from pybemobil.preproc.utils import (
         get_descriptor,
         init_descriptor,
         set_descriptor,

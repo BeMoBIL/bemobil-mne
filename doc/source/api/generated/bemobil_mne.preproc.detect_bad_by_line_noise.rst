@@ -1,6 +1,6 @@
 ﻿bemobil\_mne.preproc.detect\_bad\_by\_line\_noise
 =================================================
 
-.. currentmodule:: bemobil_mne.preproc
+.. currentmodule:: pybemobil.preproc
 
 .. autofunction:: detect_bad_by_line_noise

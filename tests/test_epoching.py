@@ -1,4 +1,4 @@
-"""Tests for bemobil_mne.preproc.epoching."""
+"""Tests for pybemobil.preproc.epoching."""
 
 # %% Imports
 
@@ -7,7 +7,7 @@ import logging
 import mne
 import numpy as np
 
-from bemobil_mne.preproc import EpochPreparer, get_stimulus_rename_map
+from pybemobil.preproc import EpochPreparer, get_stimulus_rename_map
 
 # %% Helpers
 

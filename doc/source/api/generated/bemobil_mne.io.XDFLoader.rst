@@ -1,7 +1,7 @@
 ﻿bemobil\_mne.io.XDFLoader
 =========================
 
-.. currentmodule:: bemobil_mne.io
+.. currentmodule:: pybemobil.io
 
 .. autoclass:: XDFLoader
 

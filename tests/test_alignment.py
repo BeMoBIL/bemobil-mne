@@ -1,11 +1,11 @@
-"""Tests for bemobil_mne.io.alignment."""
+"""Tests for pybemobil.io.alignment."""
 
 # %% Imports
 
 import numpy as np
 import pytest
 
-from bemobil_mne.io.alignment import align_stream_to_timestamps
+from pybemobil.io.alignment import align_stream_to_timestamps
 
 # %% Tests
 

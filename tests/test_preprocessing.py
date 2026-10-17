@@ -1,4 +1,4 @@
-"""Tests for bemobil_mne.preproc.preprocessing."""
+"""Tests for pybemobil.preproc.preprocessing."""
 
 # %% Imports
 
@@ -8,7 +8,7 @@ import mne
 import numpy as np
 import pytest
 
-from bemobil_mne.preproc.preprocessing import (
+from pybemobil.preproc.preprocessing import (
     EEGPreprocessor,
     _bids_raw_target,
     _output_stem,
@@ -329,7 +329,7 @@ def test_eegpreprocessor_rename_channels(tmp_path, sample_raw):
 @pytest.mark.slowtest
 def test_eegpreprocessor_provenance_recorded(tmp_path, sample_raw):
     """Record a provenance descriptor in raw.info."""
-    from bemobil_mne.preproc.utils import get_descriptor
+    from pybemobil.preproc.utils import get_descriptor
 
     proc = EEGPreprocessor(loader=None, fit_ica=False)
     raw_out, _, _ = proc.run_raw(sample_raw.copy(), fname_out=None)
@@ -420,7 +420,7 @@ def test_run_raw_overwrite_does_not_rewrite_bids_raw(tmp_path):
     proc = EEGPreprocessor(loader=None)
     proc._save_bids_raw(raw, fname_out)
 
-    with patch("bemobil_mne.io.bids_export.export_to_bids") as mock_export:
+    with patch("pybemobil.io.bids_export.export_to_bids") as mock_export:
         proc._save_bids_raw(raw, fname_out)
     mock_export.assert_not_called()
 
@@ -453,7 +453,7 @@ def test_get_bad_chs_keeps_default_pyprep_kwargs():
     """Merge user pyprep_kwargs into the defaults without mutating them."""
     from unittest.mock import patch
 
-    from bemobil_mne.preproc import preprocessing as pp
+    from pybemobil.preproc import preprocessing as pp
 
     captured = {}
     real = pp.NoisyChannels
@@ -546,7 +546,7 @@ def test_run_raw_restores_log_level_on_error():
     """MNE's log level is restored even when the pipeline raises."""
     from unittest.mock import patch
 
-    from bemobil_mne.preproc import preprocessing as pp
+    from pybemobil.preproc import preprocessing as pp
 
     mne.set_log_level("INFO")
     with patch.object(pp, "get_bad_chs", side_effect=RuntimeError("boom")):
@@ -572,7 +572,7 @@ def test_run_raw_all_channels_bad_raises():
     """A clear error is raised when every EEG channel is flagged bad."""
     from unittest.mock import patch
 
-    from bemobil_mne.preproc import preprocessing as pp
+    from pybemobil.preproc import preprocessing as pp
 
     raw = _correlated_raw()
     fake = {
@@ -594,7 +594,7 @@ def test_run_raw_saves_outputs_when_report_fails(tmp_path):
     fname_out = tmp_path / "sub-01_task-rest_eeg.fif"
     proc = _fast_proc(make_report=True)
     with patch(
-        "bemobil_mne.preproc.make_report.make_report",
+        "pybemobil.preproc.make_report.make_report",
         side_effect=ValueError("bad event_id"),
     ):
         with pytest.warns(RuntimeWarning, match="Report generation failed"):
@@ -611,7 +611,7 @@ class _FakeLoader:
         self.raw = raw
 
     def load(self, fname):
-        from bemobil_mne.io import MultimodalRecording
+        from pybemobil.io import MultimodalRecording
 
         return MultimodalRecording(raw=self.raw)
 

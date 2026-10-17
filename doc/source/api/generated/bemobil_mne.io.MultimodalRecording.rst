@@ -1,7 +1,7 @@
 ﻿bemobil\_mne.io.MultimodalRecording
 ===================================
 
-.. currentmodule:: bemobil_mne.io
+.. currentmodule:: pybemobil.io
 
 .. autoclass:: MultimodalRecording
 
